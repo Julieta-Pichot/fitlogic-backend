@@ -1,9 +1,13 @@
 import { PAGINATION } from '../constants/index.js';
 
+const normalizePositiveInteger = (value, fallback, maximum = Infinity) => {
+  const parsedValue = parseInt(value, 10) || fallback;
+  return Math.min(Math.max(1, parsedValue), maximum);
+};
+
 export const parsePaginationParams = (query) => {
-  const page = Math.max(1, parseInt(query.page, 10) || PAGINATION.DEFAULT_PAGE);
-  const rawLimit = parseInt(query.limit, 10) || PAGINATION.DEFAULT_LIMIT;
-  const limit = Math.min(Math.max(1, rawLimit), PAGINATION.MAX_LIMIT);
+  const page = normalizePositiveInteger(query.page, PAGINATION.DEFAULT_PAGE);
+  const limit = normalizePositiveInteger(query.limit, PAGINATION.DEFAULT_LIMIT, PAGINATION.MAX_LIMIT);
   const skip = (page - 1) * limit;
 
   return { page, limit, skip };
