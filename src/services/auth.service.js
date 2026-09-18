@@ -14,14 +14,12 @@ export const sanitizeUser = (user) => {
 
   return {
     ...safeUser,
+    activo: user.activo ? 1 : 0,
     roleKey: roleNameToKey(user.rol?.nombre),
     roleName: user.rol?.nombre ?? null,
-    gimnasioCodigo: user.gimnasio?.codigo ?? null,
+    gimnasioCodigo: null,
     gimnasioNombre: user.gimnasio?.nombre ?? null,
-    especialidades:
-      user.profesor?.especialidades
-        ?.map((item) => item.especialidad?.nombre)
-        .filter(Boolean) ?? [],
+    especialidades: user.profesor?.especialidad ? [user.profesor.especialidad] : [],
     profile: {
       cliente: user.cliente ?? null,
       profesor: user.profesor ?? null,
@@ -37,30 +35,29 @@ const signToken = (user) =>
       email: user.email,
       rolId: user.rolId,
       roleName: user.rol?.nombre,
-      gimnasioId: user.gimnasioId,
+      gimnasioId: user.gimnasio?.id ?? null,
     },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
   );
 
 export const login = async ({ codigoGimnasio, email, password }) => {
-  const gimnasio = await prisma.gimnasio.findUnique({
-    where: { codigo: codigoGimnasio },
-  });
+  // El esquema actual usa un único registro de gimnasio y no tiene codigo.
+  // Se conserva codigoGimnasio en el request para no romper el formulario.
+  const gimnasio = await prisma.gimnasio.findFirst();
 
-  if (!gimnasio || gimnasio.activo !== 1) {
+  if (!gimnasio) {
     throw new UnauthorizedError('Credenciales inválidas');
   }
 
-  const user = await prisma.usuario.findFirst({
+  const user = await prisma.usuario.findUnique({
     where: {
       email: email.trim().toLowerCase(),
-      gimnasioId: gimnasio.id,
     },
     include: userInclude,
   });
 
-  if (!user || user.activo !== 1) {
+  if (!user || !user.activo) {
     throw new UnauthorizedError('Credenciales inválidas');
   }
 
@@ -74,7 +71,7 @@ export const login = async ({ codigoGimnasio, email, password }) => {
 
   return {
     token,
-    user: sanitizeUser(user),
+    user: sanitizeUser({ ...user, gimnasio }),
   };
 };
 
@@ -84,11 +81,12 @@ export const getCurrentUser = async (userId) => {
     include: userInclude,
   });
 
-  if (!user || user.activo !== 1) {
+  if (!user || !user.activo) {
     throw new UnauthorizedError('Usuario no válido o inactivo');
   }
 
-  return sanitizeUser(user);
+  const gimnasio = await prisma.gimnasio.findFirst();
+  return sanitizeUser({ ...user, gimnasio });
 };
 
 export const changePassword = async (userId, { currentPassword, newPassword }) => {

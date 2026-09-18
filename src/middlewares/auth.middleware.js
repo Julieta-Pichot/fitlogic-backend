@@ -5,7 +5,6 @@ import { normalizeRoleName } from '../constants/index.js';
 
 const userInclude = {
   rol: true,
-  gimnasio: true,
   cliente: { include: { estadoCliente: true } },
   profesor: true,
   recepcionista: true,
@@ -27,11 +26,12 @@ export const authenticateToken = async (req, _res, next) => {
       include: userInclude,
     });
 
-    if (!user || user.activo !== 1) {
+    if (!user || !user.activo) {
       throw new UnauthorizedError('Usuario no válido o inactivo');
     }
 
-    req.user = user;
+    const gimnasio = await prisma.gimnasio.findFirst();
+    req.user = { ...user, gimnasio, gimnasioId: gimnasio?.id ?? null };
     next();
   } catch (error) {
     if (error instanceof UnauthorizedError) {
