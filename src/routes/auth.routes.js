@@ -9,7 +9,6 @@ const router = Router();
 router.post(
   '/login',
   [
-    body('codigoGimnasio').trim().notEmpty().withMessage('El código del gimnasio es requerido'),
     body('email').trim().isEmail().withMessage('Email inválido'),
     body('password').isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres'),
     validateRequest,

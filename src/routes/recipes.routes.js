@@ -1,0 +1,10 @@
+import { Router } from 'express';
+import { authenticateToken, requireCliente, requireProfesor, requireStaff } from '../middlewares/auth.middleware.js';
+import { validateRequest } from '../middlewares/validate.middleware.js';
+import * as recipesController from '../controllers/recipes.controller.js';
+import { createRecipeValidator } from '../validators/recipe.validator.js';
+const router = Router();
+router.get('/', authenticateToken, requireStaff, recipesController.listRecipes);
+router.get('/available', authenticateToken, requireCliente, recipesController.listRecipes);
+router.post('/', authenticateToken, requireProfesor, createRecipeValidator, validateRequest, recipesController.createRecipe);
+export default router;

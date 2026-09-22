@@ -1,149 +1,57 @@
 import prisma from '../lib/prisma.js';
 import { NotFoundError, ValidationError } from '../errors/AppError.js';
-import { assertGymOwnership, gymScope } from '../utils/scope.js';
 
 const normalizePlanPayload = (payload = {}) => {
   const nombre = String(payload.nombre ?? '').trim();
   const duracionDias = Number(payload.duracionDias);
   const precio = Number(payload.precio);
-
-  if (!nombre) {
-    throw new ValidationError('El nombre del plan es obligatorio');
-  }
-
-  if (!Number.isFinite(duracionDias) || duracionDias <= 0) {
-    throw new ValidationError('La duración del plan es inválida');
-  }
-
-  if (!Number.isFinite(precio) || precio < 0) {
-    throw new ValidationError('El precio del plan es inválido');
-  }
-
-  return {
-    nombre,
-    duracionDias: Number(duracionDias),
-    precio: Number(precio.toFixed(2)),
-  };
+  if (!nombre) throw new ValidationError('El nombre del plan es obligatorio');
+  if (!Number.isInteger(duracionDias) || duracionDias <= 0) throw new ValidationError('La duración del plan es inválida');
+  if (!Number.isFinite(precio) || precio < 0) throw new ValidationError('El precio del plan es inválido');
+  return { nombre, duracionDias, precio: Number(precio.toFixed(2)) };
 };
 
-export const listPlans = async (gimnasioId, query = {}) => {
+export const listPlans = async (_gimnasioId, query = {}) => {
   const search = typeof query.search === 'string' ? query.search.trim() : '';
-  const activo = query.activo !== undefined ? Number(query.activo) : undefined;
-
+  const activo = query.activo !== undefined ? Number(query.activo) === 1 : undefined;
   return prisma.plan.findMany({
-    where: {
-      ...gymScope(gimnasioId),
-      ...(activo !== undefined ? { activo } : {}),
-      ...(search ? { nombre: { contains: search } } : {}),
-    },
-    orderBy: { fechaCreacion: 'desc' },
+    where: { ...(activo !== undefined ? { activo } : {}), ...(search ? { nombre: { contains: search } } : {}) },
+    include: { promociones: true },
+    orderBy: { id: 'desc' },
   });
 };
 
-export const getPlanById = async (gimnasioId, planId) => {
-  const plan = await prisma.plan.findUnique({ where: { id: Number(planId) } });
-
-  if (!plan) {
-    throw new NotFoundError('Plan no encontrado');
-  }
-
-  assertGymOwnership(plan.gimnasioId, gimnasioId, 'Plan');
-
+export const getPlanById = async (_gimnasioId, planId) => {
+  const plan = await prisma.plan.findUnique({ where: { id: Number(planId) }, include: { promociones: true } });
+  if (!plan) throw new NotFoundError('Plan no encontrado');
   return plan;
 };
 
-export const createPlan = async (gimnasioId, actorId, payload = {}) => {
-  const { nombre, duracionDias, precio } = normalizePlanPayload(payload);
+export const createPlan = async (_gimnasioId, _actorId, payload = {}) =>
+  prisma.plan.create({ data: { ...normalizePlanPayload(payload), activo: true } });
 
-  return prisma.plan.create({
-    data: {
-      gimnasioId,
-      nombre,
-      duracionDias,
-      precio,
-      activo: 1,
-      creadoPorId: actorId,
-      actualizadoPorId: actorId,
-    },
-  });
-};
-
-export const updatePlan = async (gimnasioId, actorId, planId, payload = {}) => {
-  const plan = await getPlanById(gimnasioId, planId);
-  const nextData = {};
-
-  if (payload.nombre !== undefined) {
-    const nombre = String(payload.nombre).trim();
-    if (!nombre) {
-      throw new ValidationError('El nombre del plan es obligatorio');
-    }
-    nextData.nombre = nombre;
+export const updatePlan = async (_gimnasioId, _actorId, planId, payload = {}) => {
+  const current = await getPlanById(null, planId);
+  const data = {};
+  if (payload.nombre !== undefined || payload.duracionDias !== undefined || payload.precio !== undefined) {
+    Object.assign(data, normalizePlanPayload({
+      nombre: payload.nombre ?? current.nombre,
+      duracionDias: payload.duracionDias ?? current.duracionDias,
+      precio: payload.precio ?? current.precio,
+    }));
   }
-
-  if (payload.duracionDias !== undefined) {
-    const duracionDias = Number(payload.duracionDias);
-    if (!Number.isFinite(duracionDias) || duracionDias <= 0) {
-      throw new ValidationError('La duración del plan es inválida');
-    }
-    nextData.duracionDias = Number(duracionDias);
-  }
-
-  if (payload.precio !== undefined) {
-    const precio = Number(payload.precio);
-    if (!Number.isFinite(precio) || precio < 0) {
-      throw new ValidationError('El precio del plan es inválido');
-    }
-    nextData.precio = Number(precio.toFixed(2));
-  }
-
   if (payload.activo !== undefined) {
     const activo = Number(payload.activo);
-    if (activo !== 0 && activo !== 1) {
-      throw new ValidationError('El estado activo del plan es inválido');
-    }
-    nextData.activo = activo;
+    if (activo !== 0 && activo !== 1) throw new ValidationError('Estado del plan inválido');
+    data.activo = activo === 1;
   }
-
-  if (Object.keys(nextData).length === 0) {
-    return plan;
-  }
-
-  return prisma.plan.update({
-    where: { id: plan.id },
-    data: {
-      ...nextData,
-      actualizadoPorId: actorId,
-    },
-  });
+  return Object.keys(data).length ? prisma.plan.update({ where: { id: current.id }, data }) : current;
 };
 
-export const togglePlanActive = async (gimnasioId, actorId, planId, activo) => {
-  const plan = await getPlanById(gimnasioId, planId);
-  const safeActivo = Number(activo);
+export const togglePlanActive = async (_gimnasioId, _actorId, planId, activo) =>
+  updatePlan(null, null, planId, { activo });
 
-  if (safeActivo !== 0 && safeActivo !== 1) {
-    throw new ValidationError('El estado activo del plan es inválido');
-  }
-
-  return prisma.plan.update({
-    where: { id: plan.id },
-    data: {
-      activo: safeActivo,
-      actualizadoPorId: actorId,
-      fechaEliminacion: safeActivo === 0 ? new Date() : null,
-    },
-  });
-};
-
-export const deletePlan = async (gimnasioId, actorId, planId) => {
-  const plan = await getPlanById(gimnasioId, planId);
-
-  return prisma.plan.update({
-    where: { id: plan.id },
-    data: {
-      activo: 0,
-      fechaEliminacion: new Date(),
-      actualizadoPorId: actorId,
-    },
-  });
+export const deletePlan = async (_gimnasioId, _actorId, planId) => {
+  const plan = await getPlanById(null, planId);
+  return prisma.plan.update({ where: { id: plan.id }, data: { activo: false } });
 };

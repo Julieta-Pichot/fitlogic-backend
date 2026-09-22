@@ -1,0 +1,12 @@
+import { Router } from 'express';
+import { authenticateToken, requireCliente, requireProfesor, requireStaff } from '../middlewares/auth.middleware.js';
+import { validateRequest } from '../middlewares/validate.middleware.js';
+import * as classesController from '../controllers/classes.controller.js';
+import { classIdValidator, createClassValidator, rateClassValidator } from '../validators/class.validator.js';
+const router = Router();
+router.get('/', authenticateToken, requireStaff, classesController.listClasses);
+router.get('/available', authenticateToken, requireCliente, classesController.listClasses);
+router.post('/', authenticateToken, requireProfesor, createClassValidator, validateRequest, classesController.createClass);
+router.post('/:id/enroll', authenticateToken, requireCliente, classIdValidator, validateRequest, classesController.enroll);
+router.post('/:id/rate', authenticateToken, requireCliente, rateClassValidator, validateRequest, classesController.rate);
+export default router;

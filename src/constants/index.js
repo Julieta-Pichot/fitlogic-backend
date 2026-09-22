@@ -13,10 +13,9 @@ export const ROLE_NAMES = {
 };
 
 export const ESTADOS_CLIENTE = {
-  ACTIVO: 1,
-  PENDIENTE_PAGO: 2,
-  PENDIENTE_HABILITACION: 3,
-  BAJA: 4,
+  HABILITADO: 1,
+  INHABILITADO_PAGO: 2,
+  INHABILITADO_BAJA: 3,
 };
 
 export const ESTADOS_CUOTA = {

@@ -1,176 +1,72 @@
 import prisma from '../lib/prisma.js';
 import { NotFoundError, ValidationError } from '../errors/AppError.js';
-import { assertGymOwnership, gymScope } from '../utils/scope.js';
 
-const normalizePromotionPayload = (payload = {}) => {
-  const nombre = String(payload.nombre ?? '').trim();
-  const descripcion = payload.descripcion !== undefined ? String(payload.descripcion).trim() : null;
-  const descuentoPorcentaje = Number(payload.descuentoPorcentaje ?? payload.discount ?? 0);
-  const tipo = Number(payload.tipo ?? payload.type ?? 1);
-  const fechaInicio = payload.fechaInicio ?? payload.startDate ?? new Date().toISOString();
-  const fechaFin = payload.fechaFin ?? payload.endDate ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  const activo = payload.activo !== undefined ? Number(payload.activo) : 1;
+const include = { plan: true };
 
-  if (!nombre) {
-    throw new ValidationError('El nombre de la promoción es obligatorio');
+const normalizePromotionPayload = (payload = {}, partial = false) => {
+  const data = {};
+  if (!partial || payload.planId !== undefined) data.planId = Number(payload.planId);
+  if (!partial || payload.nombre !== undefined) data.nombre = String(payload.nombre ?? '').trim();
+  if (!partial || payload.descripcion !== undefined) data.descripcion = String(payload.descripcion ?? '').trim() || null;
+  if (!partial || payload.descuento !== undefined || payload.descuentoPorcentaje !== undefined) {
+    data.descuento = Number(payload.descuento ?? payload.descuentoPorcentaje);
+  }
+  if (!partial || payload.fechaInicio !== undefined) data.fechaInicio = new Date(payload.fechaInicio ?? Date.now());
+  if (!partial || payload.fechaFin !== undefined) data.fechaFin = new Date(payload.fechaFin ?? Date.now() + 30 * 86400000);
+  if (!partial || payload.activa !== undefined || payload.activo !== undefined) {
+    data.activa = Number(payload.activa ?? payload.activo) === 1;
   }
 
-  if (!Number.isFinite(descuentoPorcentaje) || descuentoPorcentaje < 0 || descuentoPorcentaje > 100) {
+  if (data.planId !== undefined && !Number.isInteger(data.planId)) throw new ValidationError('El plan de la promoción es inválido');
+  if (data.nombre !== undefined && !data.nombre) throw new ValidationError('El nombre de la promoción es obligatorio');
+  if (data.descuento !== undefined && (!Number.isFinite(data.descuento) || data.descuento < 0 || data.descuento > 100)) {
     throw new ValidationError('El descuento debe estar entre 0 y 100');
   }
-
-  if (tipo !== 1 && tipo !== 2) {
-    throw new ValidationError('El tipo de promoción es inválido');
-  }
-
-  if (activo !== 0 && activo !== 1) {
-    throw new ValidationError('El estado activo de la promoción es inválido');
-  }
-
-  return {
-    nombre,
-    descripcion: descripcion || null,
-    descuentoPorcentaje: Number(descuentoPorcentaje.toFixed(2)),
-    tipo,
-    fechaInicio: new Date(fechaInicio),
-    fechaFin: new Date(fechaFin),
-    activo,
-  };
+  if (data.fechaInicio && Number.isNaN(data.fechaInicio.getTime())) throw new ValidationError('La fecha de inicio es inválida');
+  if (data.fechaFin && Number.isNaN(data.fechaFin.getTime())) throw new ValidationError('La fecha de fin es inválida');
+  if (data.fechaInicio && data.fechaFin && data.fechaFin < data.fechaInicio) throw new ValidationError('La vigencia de la promoción es inválida');
+  return data;
 };
 
-export const listPromotions = async (gimnasioId, query = {}) => {
-  const search = typeof query.search === 'string' ? query.search.trim() : '';
-  const activo = query.activo !== undefined ? Number(query.activo) : undefined;
-  const tipo = query.tipo !== undefined ? Number(query.tipo) : undefined;
+const ensurePlan = async (planId) => {
+  if (!await prisma.plan.findUnique({ where: { id: planId } })) throw new NotFoundError('Plan no encontrado');
+};
 
+export const listPromotions = async (_gimnasioId, query = {}) => {
+  const search = typeof query.search === 'string' ? query.search.trim() : '';
+  const activa = query.activo !== undefined ? Number(query.activo) === 1 : undefined;
   return prisma.promocion.findMany({
-    where: {
-      ...gymScope(gimnasioId),
-      ...(activo !== undefined ? { activo } : {}),
-      ...(tipo !== undefined ? { tipo } : {}),
-      ...(search ? { nombre: { contains: search } } : {}),
-    },
-    orderBy: { fechaCreacion: 'desc' },
+    where: { ...(activa !== undefined ? { activa } : {}), ...(search ? { nombre: { contains: search } } : {}) },
+    include,
+    orderBy: { id: 'desc' },
   });
 };
 
-export const getPromotionById = async (gimnasioId, promotionId) => {
-  const promotion = await prisma.promocion.findUnique({ where: { id: Number(promotionId) } });
-
-  if (!promotion) {
-    throw new NotFoundError('Promoción no encontrada');
-  }
-
-  assertGymOwnership(promotion.gimnasioId, gimnasioId, 'Promoción');
-
+export const getPromotionById = async (_gimnasioId, promotionId) => {
+  const promotion = await prisma.promocion.findUnique({ where: { id: Number(promotionId) }, include });
+  if (!promotion) throw new NotFoundError('Promoción no encontrada');
   return promotion;
 };
 
-export const createPromotion = async (gimnasioId, actorId, payload = {}) => {
+export const createPromotion = async (_gimnasioId, _actorId, payload = {}) => {
   const data = normalizePromotionPayload(payload);
-
-  return prisma.promocion.create({
-    data: {
-      gimnasioId,
-      nombre: data.nombre,
-      descripcion: data.descripcion,
-      descuentoPorcentaje: data.descuentoPorcentaje,
-      tipo: data.tipo,
-      fechaInicio: data.fechaInicio,
-      fechaFin: data.fechaFin,
-      activo: data.activo,
-      creadoPorId: actorId,
-      actualizadoPorId: actorId,
-    },
-  });
+  await ensurePlan(data.planId);
+  return prisma.promocion.create({ data, include });
 };
 
-export const updatePromotion = async (gimnasioId, actorId, promotionId, payload = {}) => {
-  const promotion = await getPromotionById(gimnasioId, promotionId);
-  const nextData = {};
-
-  if (payload.nombre !== undefined) {
-    const nombre = String(payload.nombre).trim();
-    if (!nombre) {
-      throw new ValidationError('El nombre de la promoción es obligatorio');
-    }
-    nextData.nombre = nombre;
-  }
-
-  if (payload.descripcion !== undefined) {
-    nextData.descripcion = String(payload.descripcion).trim() || null;
-  }
-
-  if (payload.descuentoPorcentaje !== undefined || payload.discount !== undefined) {
-    const descuento = Number(payload.descuentoPorcentaje ?? payload.discount ?? 0);
-    if (!Number.isFinite(descuento) || descuento < 0 || descuento > 100) {
-      throw new ValidationError('El descuento debe estar entre 0 y 100');
-    }
-    nextData.descuentoPorcentaje = Number(descuento.toFixed(2));
-  }
-
-  if (payload.tipo !== undefined || payload.type !== undefined) {
-    const tipo = Number(payload.tipo ?? payload.type ?? 1);
-    if (tipo !== 1 && tipo !== 2) {
-      throw new ValidationError('El tipo de promoción es inválido');
-    }
-    nextData.tipo = tipo;
-  }
-
-  if (payload.fechaInicio !== undefined || payload.startDate !== undefined) {
-    nextData.fechaInicio = new Date(payload.fechaInicio ?? payload.startDate);
-  }
-
-  if (payload.fechaFin !== undefined || payload.endDate !== undefined) {
-    nextData.fechaFin = new Date(payload.fechaFin ?? payload.endDate);
-  }
-
-  if (payload.activo !== undefined) {
-    const activo = Number(payload.activo);
-    if (activo !== 0 && activo !== 1) {
-      throw new ValidationError('El estado activo de la promoción es inválido');
-    }
-    nextData.activo = activo;
-  }
-
-  if (Object.keys(nextData).length === 0) {
-    return promotion;
-  }
-
-  return prisma.promocion.update({
-    where: { id: promotion.id },
-    data: {
-      ...nextData,
-      actualizadoPorId: actorId,
-    },
-  });
+export const updatePromotion = async (_gimnasioId, _actorId, promotionId, payload = {}) => {
+  const current = await getPromotionById(null, promotionId);
+  const data = normalizePromotionPayload(payload, true);
+  if (data.planId !== undefined) await ensurePlan(data.planId);
+  return Object.keys(data).length ? prisma.promocion.update({ where: { id: current.id }, data, include }) : current;
 };
 
-export const togglePromotionActive = async (gimnasioId, actorId, promotionId, activo) => {
-  const promotion = await getPromotionById(gimnasioId, promotionId);
-  const safeActivo = Number(activo);
-
-  if (safeActivo !== 0 && safeActivo !== 1) {
-    throw new ValidationError('El estado activo de la promoción es inválido');
-  }
-
-  return prisma.promocion.update({
-    where: { id: promotion.id },
-    data: {
-      activo: safeActivo,
-      actualizadoPorId: actorId,
-    },
-  });
+export const togglePromotionActive = async (_gimnasioId, _actorId, promotionId, activo) => {
+  const current = await getPromotionById(null, promotionId);
+  const value = Number(activo);
+  if (value !== 0 && value !== 1) throw new ValidationError('Estado de la promoción inválido');
+  return prisma.promocion.update({ where: { id: current.id }, data: { activa: value === 1 }, include });
 };
 
-export const deletePromotion = async (gimnasioId, actorId, promotionId) => {
-  const promotion = await getPromotionById(gimnasioId, promotionId);
-
-  return prisma.promocion.update({
-    where: { id: promotion.id },
-    data: {
-      activo: 0,
-      actualizadoPorId: actorId,
-    },
-  });
-};
+export const deletePromotion = async (_gimnasioId, _actorId, promotionId) =>
+  togglePromotionActive(null, null, promotionId, 0);

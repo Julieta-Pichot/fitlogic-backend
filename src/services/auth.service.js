@@ -41,9 +41,7 @@ const signToken = (user) =>
     { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
   );
 
-export const login = async ({ codigoGimnasio, email, password }) => {
-  // El esquema actual usa un único registro de gimnasio y no tiene codigo.
-  // Se conserva codigoGimnasio en el request para no romper el formulario.
+export const login = async ({ email, password }) => {
   const gimnasio = await prisma.gimnasio.findFirst();
 
   if (!gimnasio) {
