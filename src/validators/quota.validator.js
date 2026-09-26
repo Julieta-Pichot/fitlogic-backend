@@ -9,5 +9,6 @@ export const createQuotaValidator = [
 export const confirmPaymentValidator = [
   ...quotaIdValidator,
   body('metodoPagoId').isInt({ min: 1 }).withMessage('El método de pago es obligatorio'),
+  body('monto').optional({ nullable: true }).isFloat({ gt: 0, max: 99999999.99 }).withMessage('El monto debe ser mayor a 0'),
   body('referenciaExterna').optional({ nullable: true }).isString().trim().isLength({ max: 200 }),
 ];

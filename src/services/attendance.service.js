@@ -48,7 +48,9 @@ export const validateClientAccess = async (clientId) => {
       ? client.estadoCliente.nombre !== 'HABILITADO'
         ? 'El cliente no está habilitado'
         : !quotaAllowed
-          ? 'La cuota está vencida'
+          ? client.cuotas.some((quota) => quota.estadoCuota.nombre === 'PENDIENTE')
+            ? 'La cuota está pendiente de pago'
+            : 'La cuota está vencida'
           : 'El apto físico está vencido o no fue cargado'
       : 'Acceso autorizado',
     client,

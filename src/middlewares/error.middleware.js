@@ -17,6 +17,13 @@ export const errorHandler = (error, _req, res, _next) => {
     });
   }
 
+  if (error?.name === 'MulterError') {
+    return sendError(res, {
+      message: error.code === 'LIMIT_FILE_SIZE' ? 'El archivo supera el máximo de 5 MB' : 'Archivo inválido',
+      statusCode: 400,
+    });
+  }
+
   if (error?.name === 'PrismaClientKnownRequestError' && error.code === 'P2002') {
     return sendError(res, {
       message: 'El registro ya existe',

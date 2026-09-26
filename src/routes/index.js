@@ -11,6 +11,7 @@ import routinesRoutes from './routines.routes.js';
 import classesRoutes from './classes.routes.js';
 import recipesRoutes from './recipes.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
+import recepcionRoutes from './recepcion.routes.js';
 
 const router = Router();
 
@@ -26,5 +27,6 @@ router.use('/routines', routinesRoutes);
 router.use('/classes', classesRoutes);
 router.use('/recipes', recipesRoutes);
 router.use('/admin/dashboard', dashboardRoutes);
+router.use('/recepcion', recepcionRoutes);
 
 export default router;

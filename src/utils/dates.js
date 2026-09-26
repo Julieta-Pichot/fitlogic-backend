@@ -3,6 +3,17 @@ const MONTH_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'S
 export const startOfDay = (date = new Date()) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
+// Fecha sin hora para columnas @db.Date: Prisma serializa en UTC, así que se
+// arma en UTC-medianoche con el día calendario local para no correrse de día.
+export const toDateOnly = (date = new Date()) =>
+  new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+
+export const startOfNextDay = (date = new Date()) => {
+  const next = startOfDay(date);
+  next.setDate(next.getDate() + 1);
+  return next;
+};
+
 export const startOfMonth = (date = new Date()) =>
   new Date(date.getFullYear(), date.getMonth(), 1);
 

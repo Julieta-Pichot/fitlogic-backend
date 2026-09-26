@@ -28,6 +28,13 @@ export const updateMedicalClearance = async (req, res, next) => {
   } catch (error) { return next(error); }
 };
 
+export const uploadMedicalClearance = async (req, res, next) => {
+  try {
+    const data = await clientsService.uploadMedicalClearance(req.params.id, req.file);
+    return sendSuccess(res, { message: 'Apto físico cargado correctamente', data });
+  } catch (error) { return next(error); }
+};
+
 export const changeClientStatus = async (req, res, next) => {
   try {
     const data = await clientsService.changeClientStatus(req.params.id, req.body.estado);

@@ -23,7 +23,7 @@ export const createQuota = async (req, res, next) => {
 
 export const confirmPayment = async (req, res, next) => {
   try {
-    const data = await quotasService.confirmQuotaPayment(req.params.id, req.body.metodoPagoId, req.body.referenciaExterna);
+    const data = await quotasService.confirmQuotaPayment(req.params.id, req.body.metodoPagoId, req.body.referenciaExterna, req.body.monto);
     return sendSuccess(res, { message: 'Pago confirmado y cuota activada', data });
   } catch (error) { return next(error); }
 };

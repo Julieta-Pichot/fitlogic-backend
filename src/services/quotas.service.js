@@ -54,8 +54,13 @@ export const createPendingQuota = async ({ userId, clientId, planId }) => {
   });
 };
 
-export const confirmQuotaPayment = async (quotaId, metodoPagoId, referenciaExterna) => {
-  const quota = await prisma.cuota.findUnique({ where: { id: Number(quotaId) }, include: { plan: true, estadoCuota: true, pago: true } });
+// `monto` es opcional: si no viene se cobra el precio del plan. El recepcionista
+// puede ajustarlo (descuentos, pagos parciales acordados, etc.).
+export const confirmQuotaPayment = async (quotaId, metodoPagoId, referenciaExterna, monto) => {
+  const quota = await prisma.cuota.findUnique({
+    where: { id: Number(quotaId) },
+    include: { plan: true, estadoCuota: true, pago: true, cliente: { include: { estadoCliente: true } } },
+  });
   if (!quota) throw new NotFoundError('Cuota no encontrada');
   if (quota.pago) throw new ConflictError('La cuota ya tiene un pago registrado');
   if (quota.estadoCuota.nombre !== 'PENDIENTE') throw new ConflictError('La cuota no está pendiente de confirmación');
@@ -63,16 +68,26 @@ export const confirmQuotaPayment = async (quotaId, metodoPagoId, referenciaExter
   if (!method) throw new ValidationError('Método de pago inválido');
   const active = await findState('ACTIVA');
 
+  const amount = monto === undefined || monto === null || monto === '' ? Number(quota.plan.precio) : Number(monto);
+  if (!Number.isFinite(amount) || amount <= 0) throw new ValidationError('El monto debe ser mayor a 0');
+
+  // Un cliente que quedó INHABILITADO_PAGO (validateClientAccess lo marca cuando no
+  // hay cuota activa) vuelve a HABILITADO al pagar. INHABILITADO_BAJA no se toca.
+  const reenable = quota.cliente.estadoCliente.nombre === 'INHABILITADO_PAGO'
+    ? await prisma.estadoCliente.findUnique({ where: { nombre: 'HABILITADO' } })
+    : null;
+
   return prisma.$transaction(async (tx) => {
     await tx.pago.create({
       data: {
         cuotaId: quota.id,
         metodoPagoId: method.id,
-        monto: quota.plan.precio,
+        monto: Number(amount.toFixed(2)),
         fechaPago: new Date(),
         referenciaExterna: referenciaExterna ? String(referenciaExterna).trim() : null,
       },
     });
+    if (reenable) await tx.cliente.update({ where: { id: quota.clienteId }, data: { estadoClienteId: reenable.id } });
     return tx.cuota.update({ where: { id: quota.id }, data: { estadoCuotaId: active.id }, include: quotaInclude });
   });
 };
