@@ -1,0 +1,23 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno (contienen credenciales: DATABASE_URL, JWT_SECRET, etc.)
+.env
+.env.local
+.env.*.local
+
+# Archivos subidos en runtime (aptos físicos, etc.).
+# La carpeta se recrea sola: upload.middleware.js la crea con fs.mkdirSync
+# la primera vez que alguien sube un archivo.
+uploads/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / SO
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
