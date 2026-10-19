@@ -202,15 +202,42 @@ export const updateUser = async (_gimnasioId, actorId, userId, payload) => {
 };
 
 export const toggleUserActive = async (_gimnasioId, actorId, userId, activo) => {
-  const user = await prisma.usuario.findUnique({ where: { id: userId } });
+  const user = await prisma.usuario.findUnique({
+    where: { id: userId },
+    include: { cliente: { include: { estadoCliente: true } } },
+  });
   if (!user) throw new NotFoundError('Usuario no encontrado');
   ensureAdminTarget(user);
   ensureNotSelf(userId, actorId, activo === 0 ? 'desactivar' : 'activar');
 
-  const updated = await prisma.usuario.update({
-    where: { id: userId },
-    data: { activo: activo === 1 },
-    include: userInclude,
+  const updated = await prisma.$transaction(async (tx) => {
+    // Usuario.activo solo controla el login. Si la cuenta es de un Cliente,
+    // este toggle también sincroniza su estado de socio (Cliente.estadoClienteId),
+    // que es lo que leen el dashboard del admin, el del recepcionista y la
+    // lista de clientes para decidir quién cuenta como "activo".
+    if (user.cliente) {
+      if (activo === 0) {
+        const baja = await tx.estadoCliente.findUnique({ where: { nombre: 'INHABILITADO_BAJA' } });
+        if (baja) {
+          await tx.cliente.update({ where: { id: user.cliente.id }, data: { estadoClienteId: baja.id } });
+        }
+      } else if (user.cliente.estadoCliente.nombre === 'INHABILITADO_BAJA') {
+        // Solo deshacemos la baja que puso este mismo toggle. Si el estado
+        // actual es INHABILITADO_PAGO (cuota vencida), eso se resuelve
+        // únicamente registrando el pago (ver quotas.service.js), no reactivando
+        // la cuenta — si no, se dejaría entrar al gimnasio sin haber pagado.
+        const habilitado = await tx.estadoCliente.findUnique({ where: { nombre: 'HABILITADO' } });
+        if (habilitado) {
+          await tx.cliente.update({ where: { id: user.cliente.id }, data: { estadoClienteId: habilitado.id } });
+        }
+      }
+    }
+
+    return tx.usuario.update({
+      where: { id: userId },
+      data: { activo: activo === 1 },
+      include: userInclude,
+    });
   });
   logger.info('Estado de usuario actualizado', { userId, actorId, activo });
   return sanitizeUser(updated);
