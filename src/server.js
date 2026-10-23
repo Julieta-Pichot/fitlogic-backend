@@ -5,6 +5,9 @@ import prisma from './lib/prisma.js';
 import apiRoutes from './routes/index.js';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js';
 import { sendSuccess } from './utils/response.js';
+import { verifySchemaOnStartup } from './lib/schema-check.js';
+import { RECIPES_UPLOADS_PATH } from './middlewares/upload.middleware.js';
+import { startNotificationScheduler, stopNotificationScheduler } from './services/notification-scheduler.js';
 
 dotenv.config();
 
@@ -39,6 +42,9 @@ app.use(
 
 app.use(express.json());
 
+// Fotos de recetas (imágenes públicas, con nombre único generado por el servidor).
+app.use('/uploads/recetas', express.static(RECIPES_UPLOADS_PATH, { index: false, dotfiles: 'deny' }));
+
 app.get('/api/health', (_req, res) => {
   return sendSuccess(res, {
     message: 'FitLogic API funcionando correctamente',
@@ -56,10 +62,14 @@ app.use(errorHandler);
 
 const server = app.listen(PORT, () => {
   console.log(`FitLogic API escuchando en puerto ${PORT}`);
+  verifySchemaOnStartup().then((ok) => {
+    if (ok && process.env.DISABLE_SCHEDULER !== 'true') startNotificationScheduler();
+  });
 });
 
 const shutdown = async (signal) => {
   console.log(`${signal} recibido. Cerrando servidor...`);
+  stopNotificationScheduler();
   server.close(async () => {
     await prisma.$disconnect();
     process.exit(0);

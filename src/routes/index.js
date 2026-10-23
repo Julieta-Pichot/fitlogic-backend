@@ -12,6 +12,8 @@ import classesRoutes from './classes.routes.js';
 import recipesRoutes from './recipes.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
 import recepcionRoutes from './recepcion.routes.js';
+import profesorRoutes from './profesor.routes.js';
+import exercisesRoutes from './exercises.routes.js';
 
 const router = Router();
 
@@ -28,5 +30,7 @@ router.use('/classes', classesRoutes);
 router.use('/recipes', recipesRoutes);
 router.use('/admin/dashboard', dashboardRoutes);
 router.use('/recepcion', recepcionRoutes);
+router.use('/profesor', profesorRoutes);
+router.use('/ejercicios', exercisesRoutes);
 
 export default router;

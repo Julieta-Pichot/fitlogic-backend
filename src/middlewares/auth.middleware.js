@@ -65,6 +65,31 @@ export const requireRole = (...roles) => (req, _res, next) => {
   return next();
 };
 
+// Rol PROFESOR + cuenta HABILITADA (estado_cuenta_staff). Deja el registro del
+// profesor en req.profesor: el id del profesor siempre sale del usuario autenticado,
+// nunca de lo que mande el front.
+export const requireProfesorHabilitado = [
+  requireRole('PROFESOR'),
+  async (req, _res, next) => {
+    try {
+      const profesor = await prisma.profesor.findUnique({
+        where: { usuarioId: req.user.id },
+        include: { estadoCuentaStaff: true },
+      });
+
+      if (!profesor) throw new ForbiddenError('Perfil de profesor no encontrado');
+      if (profesor.estadoCuentaStaff?.nombre !== 'HABILITADO') {
+        throw new ForbiddenError('Tu cuenta de profesor está inhabilitada');
+      }
+
+      req.profesor = profesor;
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  },
+];
+
 export const requireAdmin = requireRole('ADMIN');
 export const requireProfesor = requireRole('PROFESOR');
 export const requireRecepcionista = requireRole('RECEPCIONISTA');

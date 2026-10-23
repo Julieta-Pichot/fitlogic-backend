@@ -1,20 +1,182 @@
 import prisma from '../lib/prisma.js';
 import { NotFoundError, ValidationError } from '../errors/AppError.js';
+import { cleanText, optionalText } from '../utils/text.js';
+import { RECIPE_PHOTO_URL_PREFIX, removeRecipePhoto } from '../middlewares/upload.middleware.js';
 
 const include = { categoriaReceta: true, ingredientes: true, pasos: { orderBy: { numeroPaso: 'asc' } }, profesor: { include: { usuario: true } } };
-const getProfessor = async (userId) => {
-  const professor = await prisma.profesor.findUnique({ where: { usuarioId: userId } });
-  if (!professor) throw new NotFoundError('Perfil de profesor no encontrado');
-  return professor;
+
+const professorInclude = {
+  categoriaReceta: true,
+  ingredientes: { orderBy: { id: 'asc' } },
+  pasos: { orderBy: { numeroPaso: 'asc' } },
 };
-export const listRecipes = async (userId, role) => prisma.receta.findMany({ where: role === 'PROFESOR' ? { profesor: { usuarioId: userId } } : {}, include, orderBy: { id: 'desc' } });
-export const createRecipe = async (userId, payload = {}) => {
-  const professor = await getProfessor(userId);
-  const nombre = String(payload.nombre ?? '').trim();
-  if (!nombre || !payload.categoriaRecetaId) throw new ValidationError('Nombre y categoría son obligatorios');
-  const category = await prisma.categoriaReceta.findUnique({ where: { id: Number(payload.categoriaRecetaId) } });
+
+// Listado para clientes y staff (sin cambios).
+export const listRecipes = async (userId, role) =>
+  prisma.receta.findMany({
+    where: role === 'PROFESOR' ? { profesor: { usuarioId: userId } } : {},
+    include,
+    orderBy: { id: 'desc' },
+  });
+
+export const listCategories = () =>
+  prisma.categoriaReceta.findMany({ select: { id: true, nombre: true }, orderBy: { id: 'asc' } });
+
+const toProfessorRecipe = (recipe) => ({
+  id: recipe.id,
+  nombre: recipe.nombre,
+  descripcion: recipe.descripcion,
+  categoria: { id: recipe.categoriaReceta.id, nombre: recipe.categoriaReceta.nombre },
+  calorias: recipe.calorias,
+  tiempoPreparacion: recipe.tiempoPreparacion,
+  foto: recipe.foto,
+  ingredientes: recipe.ingredientes.map((item) => ({ id: item.id, nombre: item.nombre, cantidad: item.cantidad, unidad: item.unidad })),
+  pasos: recipe.pasos.map((item) => ({ numeroPaso: item.numeroPaso, descripcion: item.descripcion })),
+});
+
+const toOptionalInt = (value, label, max) => {
+  if (value === undefined || value === null || value === '') return null;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 0 || number > max) {
+    throw new ValidationError(`${label} debe ser un número entero entre 0 y ${max}`);
+  }
+  return number;
+};
+
+const parseRecipeBody = async (payload = {}) => {
+  const nombre = cleanText(payload.nombre);
+  if (!nombre) throw new ValidationError('El nombre de la receta es obligatorio');
+  if (nombre.length > 150) throw new ValidationError('El nombre de la receta no puede superar los 150 caracteres');
+
+  const categoriaRecetaId = Number(payload.categoriaRecetaId);
+  if (!Number.isInteger(categoriaRecetaId) || categoriaRecetaId < 1) throw new ValidationError('Elegí una categoría');
+  const category = await prisma.categoriaReceta.findUnique({ where: { id: categoriaRecetaId } });
   if (!category) throw new NotFoundError('Categoría de receta no encontrada');
-  const ingredients = Array.isArray(payload.ingredientes) ? payload.ingredientes.filter((item) => String(item.nombre ?? '').trim()) : [];
-  const steps = Array.isArray(payload.pasos) ? payload.pasos.filter((item) => String(item.descripcion ?? '').trim()) : [];
-  return prisma.receta.create({ data: { profesorId: professor.id, categoriaRecetaId: category.id, nombre, descripcion: payload.descripcion ? String(payload.descripcion).trim() : null, calorias: payload.calorias ? Number(payload.calorias) : null, tiempoPreparacion: payload.tiempoPreparacion ? Number(payload.tiempoPreparacion) : null, ingredientes: { create: ingredients.map((item) => ({ nombre: String(item.nombre).trim(), cantidad: item.cantidad ? String(item.cantidad).trim() : null, unidad: item.unidad ? String(item.unidad).trim() : null })) }, pasos: { create: steps.map((item, index) => ({ numeroPaso: index + 1, descripcion: String(item.descripcion).trim() })) } }, include });
+
+  const ingredientes = (Array.isArray(payload.ingredientes) ? payload.ingredientes : [])
+    .map((item) => ({
+      nombre: cleanText(item?.nombre),
+      cantidad: optionalText(item?.cantidad),
+      unidad: optionalText(item?.unidad),
+    }))
+    .filter((item) => item.nombre);
+  for (const item of ingredientes) {
+    if (item.nombre.length > 150) throw new ValidationError('Un ingrediente supera los 150 caracteres');
+    if (item.cantidad && item.cantidad.length > 50) throw new ValidationError('La cantidad de un ingrediente supera los 50 caracteres');
+    if (item.unidad && item.unidad.length > 30) throw new ValidationError('La unidad de un ingrediente supera los 30 caracteres');
+  }
+
+  // numero_paso consecutivo desde 1 (hay UNIQUE(receta_id, numero_paso)).
+  const pasos = (Array.isArray(payload.pasos) ? payload.pasos : [])
+    .map((item) => optionalText(item?.descripcion))
+    .filter(Boolean)
+    .map((descripcion, index) => ({ numeroPaso: index + 1, descripcion }));
+
+  return {
+    categoriaRecetaId: category.id,
+    nombre,
+    descripcion: optionalText(payload.descripcion),
+    calorias: toOptionalInt(payload.calorias, 'Las calorías', 100000),
+    tiempoPreparacion: toOptionalInt(payload.tiempoPreparacion, 'El tiempo de preparación', 10000),
+    ingredientes,
+    pasos,
+  };
+};
+
+export const listRecipesForProfessor = async (profesorId) => {
+  const recipes = await prisma.receta.findMany({
+    where: { profesorId },
+    include: professorInclude,
+    orderBy: { id: 'desc' },
+  });
+  return recipes.map(toProfessorRecipe);
+};
+
+export const createRecipe = async (profesorId, payload = {}, file = null) => {
+  const newPhoto = file ? `${RECIPE_PHOTO_URL_PREFIX}${file.filename}` : null;
+
+  try {
+    const data = await parseRecipeBody(payload);
+
+    const recipe = await prisma.$transaction((tx) =>
+      tx.receta.create({
+        data: {
+          profesorId,
+          categoriaRecetaId: data.categoriaRecetaId,
+          nombre: data.nombre,
+          descripcion: data.descripcion,
+          calorias: data.calorias,
+          tiempoPreparacion: data.tiempoPreparacion,
+          foto: newPhoto,
+          ingredientes: { create: data.ingredientes },
+          pasos: { create: data.pasos },
+        },
+        include: professorInclude,
+      })
+    );
+
+    return toProfessorRecipe(recipe);
+  } catch (error) {
+    await removeRecipePhoto(newPhoto);
+    throw error;
+  }
+};
+
+export const updateRecipe = async (profesorId, recipeId, payload = {}, file = null) => {
+  const newPhoto = file ? `${RECIPE_PHOTO_URL_PREFIX}${file.filename}` : null;
+
+  try {
+    const data = await parseRecipeBody(payload);
+    let previousPhoto = null;
+
+    const recipe = await prisma.$transaction(async (tx) => {
+      const current = await tx.receta.findFirst({ where: { id: Number(recipeId), profesorId } });
+      if (!current) throw new NotFoundError('Receta no encontrada');
+
+      const removePhoto = Boolean(payload.quitarFoto);
+      const foto = newPhoto ?? (removePhoto ? null : current.foto);
+      if (foto !== current.foto) previousPhoto = current.foto;
+
+      await tx.ingredienteReceta.deleteMany({ where: { recetaId: current.id } });
+      await tx.pasoReceta.deleteMany({ where: { recetaId: current.id } });
+
+      return tx.receta.update({
+        where: { id: current.id },
+        data: {
+          categoriaRecetaId: data.categoriaRecetaId,
+          nombre: data.nombre,
+          descripcion: data.descripcion,
+          calorias: data.calorias,
+          tiempoPreparacion: data.tiempoPreparacion,
+          foto,
+          ingredientes: { create: data.ingredientes },
+          pasos: { create: data.pasos },
+        },
+        include: professorInclude,
+      });
+    });
+
+    // Recién con la transacción confirmada se borra la imagen anterior del servidor.
+    await removeRecipePhoto(previousPhoto);
+    return toProfessorRecipe(recipe);
+  } catch (error) {
+    await removeRecipePhoto(newPhoto);
+    throw error;
+  }
+};
+
+export const deleteRecipe = async (profesorId, recipeId) => {
+  const foto = await prisma.$transaction(async (tx) => {
+    const current = await tx.receta.findFirst({ where: { id: Number(recipeId), profesorId } });
+    if (!current) throw new NotFoundError('Receta no encontrada');
+
+    await tx.ingredienteReceta.deleteMany({ where: { recetaId: current.id } });
+    await tx.pasoReceta.deleteMany({ where: { recetaId: current.id } });
+    await tx.receta.delete({ where: { id: current.id } });
+
+    return current.foto;
+  });
+
+  await removeRecipePhoto(foto);
+  return { id: Number(recipeId) };
 };

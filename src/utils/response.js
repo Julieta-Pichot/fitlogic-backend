@@ -7,13 +7,14 @@ export const sendSuccess = (res, { message = null, data = null, statusCode = 200
   return res.status(statusCode).json(payload);
 };
 
-export const sendError = (res, { message, statusCode = 500, errors = null } = {}) => {
+export const sendError = (res, { message, statusCode = 500, errors = null, extra = null } = {}) => {
   const payload = {
     success: false,
     message: message ?? 'Error interno del servidor',
   };
 
   if (errors) payload.errors = errors;
+  if (extra) Object.assign(payload, extra);
 
   return res.status(statusCode).json(payload);
 };

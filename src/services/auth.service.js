@@ -87,7 +87,7 @@ export const getCurrentUser = async (userId) => {
   return sanitizeUser({ ...user, gimnasio });
 };
 
-export const changePassword = async (userId, { currentPassword, newPassword }) => {
+export const changePassword = async (userId, { currentPassword, newPassword }, { rejectSame = false } = {}) => {
   const user = await prisma.usuario.findUnique({ where: { id: userId } });
 
   if (!user) {
@@ -98,6 +98,10 @@ export const changePassword = async (userId, { currentPassword, newPassword }) =
 
   if (!passwordValid) {
     throw new ValidationError('La contraseña actual es incorrecta');
+  }
+
+  if (rejectSame && (await bcrypt.compare(newPassword, user.passwordHash))) {
+    throw new ValidationError('La nueva contraseña no puede ser igual a la actual');
   }
 
   const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);

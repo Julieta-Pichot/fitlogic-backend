@@ -1,13 +1,15 @@
 import { Router } from 'express';
-import { authenticateToken, requireCliente, requireProfesor } from '../middlewares/auth.middleware.js';
+import { authenticateToken, requireCliente, requireProfesorHabilitado } from '../middlewares/auth.middleware.js';
 import { validateRequest } from '../middlewares/validate.middleware.js';
 import * as routinesController from '../controllers/routines.controller.js';
-import { createExerciseValidator, createRoutineValidator, routineListValidator } from '../validators/routine.validator.js';
+import { createExerciseValidator, createRoutineValidator, routineIdValidator, updateRoutineValidator } from '../validators/routine.validator.js';
 
 const router = Router();
 router.get('/me', authenticateToken, requireCliente, routinesController.listMyRoutines);
-router.get('/', authenticateToken, requireProfesor, routineListValidator, validateRequest, routinesController.listRoutines);
-router.post('/', authenticateToken, requireProfesor, createRoutineValidator, validateRequest, routinesController.createRoutine);
+router.get('/', authenticateToken, ...requireProfesorHabilitado, routinesController.listRoutines);
 router.get('/exercises', authenticateToken, routinesController.listExercises);
-router.post('/exercises', authenticateToken, requireProfesor, createExerciseValidator, validateRequest, routinesController.createExercise);
+router.post('/exercises', authenticateToken, ...requireProfesorHabilitado, createExerciseValidator, validateRequest, routinesController.createExercise);
+router.get('/:id', authenticateToken, ...requireProfesorHabilitado, routineIdValidator, validateRequest, routinesController.getRoutine);
+router.post('/', authenticateToken, ...requireProfesorHabilitado, createRoutineValidator, validateRequest, routinesController.createRoutine);
+router.put('/:id', authenticateToken, ...requireProfesorHabilitado, updateRoutineValidator, validateRequest, routinesController.updateRoutine);
 export default router;

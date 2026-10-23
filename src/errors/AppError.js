@@ -36,3 +36,13 @@ export class ConflictError extends AppError {
     super(message, 409);
   }
 }
+
+// Choque de horario de sala o de profesor. `code` (SALA_OCUPADA / PROFESOR_OCUPADO) y
+// `conflictos` viajan en el JSON de la respuesta 409.
+export class ScheduleConflictError extends ConflictError {
+  constructor(code, message, conflictos) {
+    super(message);
+    this.code = code;
+    this.conflictos = conflictos;
+  }
+}

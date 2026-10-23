@@ -132,7 +132,21 @@ GET http://localhost:3001/api/health
 | `npm run db:push`     | Sincroniza el schema con la base sin crear una migración. |
 | `npm run db:studio`   | Abre Prisma Studio para explorar/editar datos.          |
 | `npm run db:seed`     | Carga catálogos, el gimnasio y usuarios de prueba.      |
+| `npm run db:seed:ejercicios` | Carga el catálogo base de ejercicios (idempotente). |
+| `npm run db:migrate:profesor` | Aplica `db/migrations/001` y `002` (panel del profesor y duración de clases; idempotentes). |
 | `npm test`            | Corre los tests (`node --test`).                        |
+
+## Panel del profesor
+
+- Migraciones `001_panel_profesor` y `002_duracion_clase` (columna `clase.duracion_minutos`). La 001: tabla `clase_dia` y columnas `clase_id` / `fecha_ocurrencia`
+  (con UNIQUE) en `notificacion`. Está en `db/migrations/001_panel_profesor.sql` (para correr a
+  mano, p. ej. en HeidiSQL) y en `prisma/migrations/1_panel_profesor` (para `prisma migrate deploy`).
+  Ambas son idempotentes.
+- Los avisos `CLASE_PROXIMA` (15 minutos antes de cada clase) los genera un scheduler interno
+  (`src/services/notification-scheduler.js`, corre cada minuto, zona horaria
+  `America/Argentina/Buenos_Aires`). Se desactiva con `DISABLE_SCHEDULER=true`.
+- Las fotos de recetas se guardan en `uploads/recetas/` y se sirven en `/uploads/recetas/<archivo>`.
+- Endpoints del profesor: `/api/profesor/*` y catálogo `/api/ejercicios` (rol PROFESOR + cuenta HABILITADA).
 
 ## Estructura del proyecto
 
