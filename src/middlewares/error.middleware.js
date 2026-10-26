@@ -5,6 +5,7 @@ export const notFoundHandler = (_req, res) => {
   return sendError(res, {
     message: 'Ruta no encontrada',
     statusCode: 404,
+    code: 'RUTA_NO_ENCONTRADA',
   });
 };
 
@@ -13,7 +14,8 @@ export const errorHandler = (error, _req, res, _next) => {
     return sendError(res, {
       message: error.message,
       statusCode: error.statusCode,
-      extra: { error: error.code, conflictos: error.conflictos },
+      extra: { conflictos: error.conflictos },
+      code: error.code,
     });
   }
 
@@ -22,6 +24,16 @@ export const errorHandler = (error, _req, res, _next) => {
       message: error.message,
       statusCode: error.statusCode,
       errors: error.errors,
+      code: error.code,
+    });
+  }
+
+  // JSON mal formado o cuerpo demasiado grande: es un error del cliente, no del servidor.
+  if (error?.type === 'entity.parse.failed' || error?.type === 'entity.too.large') {
+    return sendError(res, {
+      message: error.type === 'entity.too.large' ? 'El cuerpo de la solicitud es demasiado grande' : 'El cuerpo de la solicitud no es un JSON válido',
+      statusCode: error.type === 'entity.too.large' ? 413 : 400,
+      code: 'CUERPO_INVALIDO',
     });
   }
 
@@ -52,5 +64,6 @@ export const errorHandler = (error, _req, res, _next) => {
   return sendError(res, {
     message: 'Error interno del servidor',
     statusCode: 500,
+    code: 'ERROR_INTERNO',
   });
 };

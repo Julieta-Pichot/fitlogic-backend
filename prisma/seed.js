@@ -103,7 +103,7 @@ async function main() {
   );
 
   await Promise.all(
-    ['VENCIMIENTO_CUOTA', 'CLASE_PROXIMA', 'PUNTUAR_CLASE'].map((nombre) =>
+    ['VENCIMIENTO_CUOTA', 'CLASE_PROXIMA', 'PUNTUAR_CLASE', 'VENCIMIENTO_APTO_FISICO', 'INSCRIPCION_CLASE'].map((nombre) =>
       prisma.tipoNotificacion.upsert({
         where: { nombre },
         update: {},
@@ -150,7 +150,7 @@ async function main() {
 
   await prisma.usuario.upsert({
     where: { email: 'admin@fitlogic.com' },
-    update: { passwordHash },
+    update: {}, // nunca se pisa la contraseña de un usuario que ya existe
     create: {
       rolId: rolAdmin.id,
       nombre: 'Admin',
@@ -167,7 +167,7 @@ async function main() {
 
   const usuarioProfesor = await prisma.usuario.upsert({
     where: { email: 'profesor@fitlogic.com' },
-    update: { passwordHash },
+    update: {}, // nunca se pisa la contraseña de un usuario que ya existe
     create: {
       rolId: rolProfesor.id,
       nombre: 'Juan',
@@ -197,7 +197,7 @@ async function main() {
 
   const usuarioRecepcionista = await prisma.usuario.upsert({
     where: { email: 'recepcion@fitlogic.com' },
-    update: { passwordHash },
+    update: {}, // nunca se pisa la contraseña de un usuario que ya existe
     create: {
       rolId: rolRecepcionista.id,
       nombre: 'María',
@@ -226,7 +226,7 @@ async function main() {
 
   const usuarioCliente = await prisma.usuario.upsert({
     where: { email: 'cliente@fitlogic.com' },
-    update: { passwordHash },
+    update: {}, // nunca se pisa la contraseña de un usuario que ya existe
     create: {
       rolId: rolCliente.id,
       nombre: 'Lucía',
@@ -246,7 +246,6 @@ async function main() {
         usuarioId: usuarioCliente.id,
         estadoClienteId: estadoClienteHabilitado.id,
         objetivoEntrenamiento: 'Bajar de peso',
-        objetivoDiasRacha: 3,
       },
     });
   }

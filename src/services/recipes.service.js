@@ -1,5 +1,6 @@
 import prisma from '../lib/prisma.js';
 import { NotFoundError, ValidationError } from '../errors/AppError.js';
+import { parseNutritionBody, serializeNutrition } from '../utils/nutrition.js';
 import { cleanText, optionalText } from '../utils/text.js';
 import { RECIPE_PHOTO_URL_PREFIX, removeRecipePhoto } from '../middlewares/upload.middleware.js';
 
@@ -27,7 +28,7 @@ const toProfessorRecipe = (recipe) => ({
   nombre: recipe.nombre,
   descripcion: recipe.descripcion,
   categoria: { id: recipe.categoriaReceta.id, nombre: recipe.categoriaReceta.nombre },
-  calorias: recipe.calorias,
+  ...serializeNutrition(recipe),
   tiempoPreparacion: recipe.tiempoPreparacion,
   foto: recipe.foto,
   ingredientes: recipe.ingredientes.map((item) => ({ id: item.id, nombre: item.nombre, cantidad: item.cantidad, unidad: item.unidad })),
@@ -76,7 +77,7 @@ const parseRecipeBody = async (payload = {}) => {
     categoriaRecetaId: category.id,
     nombre,
     descripcion: optionalText(payload.descripcion),
-    calorias: toOptionalInt(payload.calorias, 'Las calorías', 100000),
+    ...parseNutritionBody(payload),
     tiempoPreparacion: toOptionalInt(payload.tiempoPreparacion, 'El tiempo de preparación', 10000),
     ingredientes,
     pasos,
@@ -106,6 +107,11 @@ export const createRecipe = async (profesorId, payload = {}, file = null) => {
           nombre: data.nombre,
           descripcion: data.descripcion,
           calorias: data.calorias,
+          proteinasG: data.proteinasG,
+          carbohidratosG: data.carbohidratosG,
+          grasasG: data.grasasG,
+          porciones: data.porciones,
+          otroDatoNutricional: data.otroDatoNutricional,
           tiempoPreparacion: data.tiempoPreparacion,
           foto: newPhoto,
           ingredientes: { create: data.ingredientes },
@@ -147,6 +153,11 @@ export const updateRecipe = async (profesorId, recipeId, payload = {}, file = nu
           nombre: data.nombre,
           descripcion: data.descripcion,
           calorias: data.calorias,
+          proteinasG: data.proteinasG,
+          carbohidratosG: data.carbohidratosG,
+          grasasG: data.grasasG,
+          porciones: data.porciones,
+          otroDatoNutricional: data.otroDatoNutricional,
           tiempoPreparacion: data.tiempoPreparacion,
           foto,
           ingredientes: { create: data.ingredientes },

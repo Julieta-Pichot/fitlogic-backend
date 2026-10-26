@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticateToken, requireAdmin, requireCliente, requireStaff } from '../middlewares/auth.middleware.js';
+import { authenticateToken, requireAdminOrReception, requireCliente, requireRole } from '../middlewares/auth.middleware.js';
 import { validateRequest } from '../middlewares/validate.middleware.js';
 import * as quotasController from '../controllers/quotas.controller.js';
 import {
@@ -12,8 +12,8 @@ import {
 const router = Router();
 
 router.get('/me', authenticateToken, requireCliente, quotasController.listMyQuotas);
-router.get('/client/:clientId', authenticateToken, requireStaff, clientIdValidator, validateRequest, quotasController.listClientQuotas);
-router.post('/', authenticateToken, createQuotaValidator, validateRequest, quotasController.createQuota);
-router.post('/:id/confirm-payment', authenticateToken, requireStaff, confirmPaymentValidator, validateRequest, quotasController.confirmPayment);
+router.get('/client/:clientId', authenticateToken, ...requireAdminOrReception, clientIdValidator, validateRequest, quotasController.listClientQuotas);
+router.post('/', authenticateToken, requireRole('ADMIN', 'RECEPCIONISTA', 'CLIENTE'), createQuotaValidator, validateRequest, quotasController.createQuota);
+router.post('/:id/confirm-payment', authenticateToken, ...requireAdminOrReception, confirmPaymentValidator, validateRequest, quotasController.confirmPayment);
 
 export default router;

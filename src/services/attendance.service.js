@@ -1,25 +1,12 @@
 import prisma from '../lib/prisma.js';
-import { ForbiddenError, NotFoundError, ValidationError } from '../errors/AppError.js';
+import { ForbiddenError, NotFoundError } from '../errors/AppError.js';
+import { dbDateMs, gymTodayMs } from '../utils/timezone.js';
 
-const getClientWithAccessData = async (clientId) => {
-  const client = await prisma.cliente.findUnique({
-    where: { id: Number(clientId) },
-    include: {
-      usuario: true,
-      estadoCliente: true,
-      cuotas: {
-        include: { estadoCuota: true, plan: true },
-        orderBy: { fechaVencimiento: 'desc' },
-      },
-    },
-  });
-  if (!client) throw new NotFoundError('Cliente no encontrado');
-  return client;
-};
+const DAY_MS = 86_400_000;
+const GRACE_DAYS = 3;
 
-const dateOnly = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
-
-export const validateClientAccess = async (clientId) => {
+// Las fechas se comparan por día calendario de Buenos Aires (no por la zona del servidor).
+export const validateClientAccess = async (clientId, now = new Date()) => {
   const client = await prisma.cliente.findUnique({
     where: { id: Number(clientId) },
     include: {
@@ -29,10 +16,10 @@ export const validateClientAccess = async (clientId) => {
   });
   if (!client) throw new NotFoundError('Cliente no encontrado');
 
-  const today = dateOnly(new Date());
+  const today = gymTodayMs(now);
   const currentQuota = client.cuotas.find((quota) => quota.estadoCuota.nombre === 'ACTIVA');
-  const graceLimit = currentQuota ? dateOnly(new Date(currentQuota.fechaVencimiento)) : null;
-  if (graceLimit) graceLimit.setDate(graceLimit.getDate() + 3);
+  // Se tolera hasta 3 días después del vencimiento de la cuota ACTIVA.
+  const graceLimit = currentQuota ? dbDateMs(currentQuota.fechaVencimiento) + GRACE_DAYS * DAY_MS : null;
   const quotaAllowed = Boolean(currentQuota && graceLimit >= today);
 
   if (!quotaAllowed && client.estadoCliente.nombre !== 'INHABILITADO_PAGO') {
@@ -40,12 +27,16 @@ export const validateClientAccess = async (clientId) => {
     if (paymentState) await prisma.cliente.update({ where: { id: client.id }, data: { estadoClienteId: paymentState.id } });
   }
 
-  const medicalAllowed = Boolean(client.aptoFisicoFechaVencimiento && dateOnly(new Date(client.aptoFisicoFechaVencimiento)) >= today);
+  const medicalAllowed = Boolean(client.aptoFisicoFechaVencimiento && dbDateMs(client.aptoFisicoFechaVencimiento) >= today);
   const allowed = client.estadoCliente.nombre === 'HABILITADO' && quotaAllowed && medicalAllowed;
   return {
     allowed,
     reason: !allowed
-      ? client.estadoCliente.nombre !== 'HABILITADO'
+      ? client.estadoCliente.nombre === 'INHABILITADO_PAGO'
+        ? 'Cliente inhabilitado por falta de pago: la cuota está vencida o sin pagar'
+        : client.estadoCliente.nombre === 'INHABILITADO_BAJA'
+          ? 'El cliente fue dado de baja'
+          : client.estadoCliente.nombre !== 'HABILITADO'
         ? 'El cliente no está habilitado'
         : !quotaAllowed
           ? client.cuotas.some((quota) => quota.estadoCuota.nombre === 'PENDIENTE')
@@ -58,11 +49,11 @@ export const validateClientAccess = async (clientId) => {
   };
 };
 
-export const registerAttendance = async (clientId, actorUserId = null) => {
-  const access = await validateClientAccess(clientId);
+export const registerAttendance = async (clientId, actorUserId = null, now = new Date()) => {
+  const access = await validateClientAccess(clientId, now);
   if (!access.allowed) throw new ForbiddenError(access.reason);
   const attendance = await prisma.asistencia.create({
-    data: { clienteId: Number(clientId), fechaHora: new Date() },
+    data: { clienteId: Number(clientId), fechaHora: now },
     include: { cliente: { include: { usuario: true } } },
   });
   return { ...attendance, registradoPorId: actorUserId };

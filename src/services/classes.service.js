@@ -1,6 +1,7 @@
 import prisma from '../lib/prisma.js';
 import { ConflictError, ForbiddenError, NotFoundError, ScheduleConflictError, ValidationError } from '../errors/AppError.js';
 import { cleanText } from '../utils/text.js';
+import { enrollInClass } from './cliente-classes.service.js';
 import { getGymParts } from '../utils/timezone.js';
 import {
   findConflicts,
@@ -25,26 +26,18 @@ const getClient = async (userId) => {
   if (!client) throw new NotFoundError('Perfil de cliente no encontrado');
   return client;
 };
-const getEnrollmentState = async (name) => {
-  const state = await prisma.estadoInscripcion.findUnique({ where: { nombre: name } });
-  if (!state) throw new ValidationError(`No existe el estado de inscripción ${name}`);
-  return state;
-};
 
 export const listClasses = async (userId, role) => {
   const where = role === 'PROFESOR' ? { profesor: { usuarioId: userId } } : {};
   return prisma.clase.findMany({ where, include: classInclude, orderBy: { fechaHora: 'asc' } });
 };
 
+// Endpoint heredado POST /classes/:id/enroll: se delega en la lógica del panel del cliente
+// (cupo = INSCRIPTO + ASISTIO, choque de horarios, reactivación de bajas, notificación).
 export const enroll = async (userId, classId) => {
-  const client = await getClient(userId);
-  const classRecord = await prisma.clase.findUnique({ where: { id: Number(classId) }, include: { inscripciones: true } });
-  if (!classRecord) throw new NotFoundError('Clase no encontrada');
-  if (classRecord.fechaHora <= new Date()) throw new ConflictError('La clase ya comenzó o finalizó');
-  if (classRecord.inscripciones.length >= classRecord.cupoMaximo) throw new ConflictError('La clase no tiene cupos disponibles');
-  if (classRecord.inscripciones.some((item) => item.clienteId === client.id)) throw new ConflictError('El cliente ya está inscripto en esta clase');
-  const state = await getEnrollmentState('INSCRIPTO');
-  return prisma.inscripcionClase.create({ data: { claseId: classRecord.id, clienteId: client.id, estadoInscripcionId: state.id }, include: { clase: true, estadoInscripcion: true } });
+  const client = await prisma.cliente.findUnique({ where: { usuarioId: userId }, include: { estadoCliente: true } });
+  if (!client) throw new NotFoundError('Perfil de cliente no encontrado');
+  return enrollInClass(client, classId);
 };
 
 export const rateClass = async (userId, classId, puntuacion, comentario) => {

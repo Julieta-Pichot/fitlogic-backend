@@ -21,13 +21,6 @@ export const updateClient = async (req, res, next) => {
   try { return sendSuccess(res, { message: 'Cliente actualizado correctamente', data: await clientsService.updateClient(req.params.id, req.body) }); } catch (error) { return next(error); }
 };
 
-export const updateMedicalClearance = async (req, res, next) => {
-  try {
-    const data = await clientsService.updateMedicalClearance(req.params.id, req.body.archivo, req.body.fechaCarga);
-    return sendSuccess(res, { message: 'Apto físico actualizado correctamente', data });
-  } catch (error) { return next(error); }
-};
-
 export const uploadMedicalClearance = async (req, res, next) => {
   try {
     const data = await clientsService.uploadMedicalClearance(req.params.id, req.file);

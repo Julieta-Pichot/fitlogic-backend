@@ -1,5 +1,6 @@
 import { body, param, query } from 'express-validator';
 import { ROLES } from '../constants/index.js';
+import { optionalPhoneRule } from '../utils/phone.js';
 
 const roleIds = Object.values(ROLES);
 
@@ -24,7 +25,7 @@ export const createUserValidator = [
   body('password')
     .isLength({ min: 6 })
     .withMessage('La contraseña debe tener al menos 6 caracteres'),
-  body('telefono').optional({ nullable: true }).trim().isLength({ max: 50 }),
+  body('telefono').optional({ nullable: true }).trim().isLength({ max: 50 }).bail().custom(optionalPhoneRule),
   body('rolId')
     .isInt()
     .withMessage('Rol inválido')
@@ -43,7 +44,7 @@ export const updateUserValidator = [
   body('nombre').optional().trim().notEmpty().isLength({ max: 100 }),
   body('apellido').optional().trim().notEmpty().isLength({ max: 100 }),
   body('email').optional().trim().isEmail().normalizeEmail(),
-  body('telefono').optional({ nullable: true }).trim().isLength({ max: 50 }),
+  body('telefono').optional({ nullable: true }).trim().isLength({ max: 50 }).bail().custom(optionalPhoneRule),
   body('rolId')
     .optional()
     .isInt()

@@ -1,7 +1,8 @@
 import prisma from '../lib/prisma.js';
 import { ConflictError, NotFoundError } from '../errors/AppError.js';
-import { addMonths, startOfDay, startOfMonth, startOfNextDay } from '../utils/dates.js';
+import { gymDayRange, gymMonthRange } from '../utils/timezone.js';
 import { getCurrentUser } from './auth.service.js';
+import { listPlans } from './membership-payments.service.js';
 
 const toAmount = (value) => {
   const amount = Number(value ?? 0);
@@ -10,10 +11,9 @@ const toAmount = (value) => {
 
 export const getDashboardStats = async () => {
   const now = new Date();
-  const dayStart = startOfDay(now);
-  const dayEnd = startOfNextDay(now);
-  const monthStart = startOfMonth(now);
-  const monthEnd = addMonths(monthStart, 1);
+  // Límites de día y mes en hora de Buenos Aires (no la zona del servidor).
+  const { start: dayStart, end: dayEnd } = gymDayRange(now);
+  const { start: monthStart, end: monthEnd } = gymMonthRange(now);
 
   const [clientesActivos, clientesInactivos, pagosPendientes, asistenciasHoy, ingresosDia, ingresosMes] =
     await Promise.all([
@@ -21,7 +21,8 @@ export const getDashboardStats = async () => {
       prisma.cliente.count({
         where: { estadoCliente: { nombre: { in: ['INHABILITADO_PAGO', 'INHABILITADO_BAJA'] } } },
       }),
-      prisma.cuota.count({ where: { estadoCuota: { nombre: 'PENDIENTE' } } }),
+      // "Pagos pendientes" = CLIENTES con alguna cuota PENDIENTE sin pago (el mismo criterio que el filtro de la pantalla Clientes).
+      prisma.cliente.count({ where: { cuotas: { some: { estadoCuota: { nombre: 'PENDIENTE' }, pago: { is: null } } } } }),
       prisma.asistencia.count({ where: { fechaHora: { gte: dayStart, lt: dayEnd } } }),
       prisma.pago.aggregate({ _sum: { monto: true }, where: { fechaPago: { gte: dayStart, lt: dayEnd } } }),
       prisma.pago.aggregate({ _sum: { monto: true }, where: { fechaPago: { gte: monthStart, lt: monthEnd } } }),
@@ -60,14 +61,9 @@ export const listRecentPayments = async (limit = 10) => {
   }));
 };
 
+// Planes activos con el precio final (promoción vigente incluida): es lo que se cobra en caja y por Mercado Pago.
 export const listActivePlans = async () => {
-  const plans = await prisma.plan.findMany({ where: { activo: true }, orderBy: [{ precio: 'asc' }, { id: 'asc' }] });
-  return plans.map((plan) => ({
-    id: plan.id,
-    nombre: plan.nombre,
-    duracionDias: plan.duracionDias,
-    precio: toAmount(plan.precio),
-  }));
+  return (await listPlans()).map((plan) => ({ id: plan.id, nombre: plan.nombre, duracionDias: plan.duracionDias, precio: plan.precio, precioFinal: plan.precioFinal, promocion: plan.promocion }));
 };
 
 export const updateMyProfile = async (userId, payload = {}) => {

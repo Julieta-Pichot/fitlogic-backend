@@ -14,6 +14,9 @@ import dashboardRoutes from './dashboard.routes.js';
 import recepcionRoutes from './recepcion.routes.js';
 import profesorRoutes from './profesor.routes.js';
 import exercisesRoutes from './exercises.routes.js';
+import clienteRoutes from './cliente.routes.js';
+import pagosRoutes from './pagos.routes.js';
+import ingresosRoutes from './ingresos.routes.js';
 
 const router = Router();
 
@@ -32,5 +35,8 @@ router.use('/admin/dashboard', dashboardRoutes);
 router.use('/recepcion', recepcionRoutes);
 router.use('/profesor', profesorRoutes);
 router.use('/ejercicios', exercisesRoutes);
+router.use('/cliente', clienteRoutes);
+router.use('/pagos', pagosRoutes);
+router.use('/admin/ingresos', ingresosRoutes);
 
 export default router;

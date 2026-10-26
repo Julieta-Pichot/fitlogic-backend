@@ -1,4 +1,6 @@
 import { body, param, query } from 'express-validator';
+import { isValidPhone, optionalPhoneRule, PHONE_MESSAGE } from '../utils/phone.js';
+import { STREAK_GOAL_MESSAGE, streakGoalRule } from '../utils/streak-goal.js';
 
 export const clientIdValidator = [param('id').isInt({ min: 1 }).withMessage('ID de cliente inválido')];
 
@@ -47,13 +49,17 @@ export const createClientValidator = [
     .withMessage('El teléfono es obligatorio')
     .bail()
     .isLength({ max: 50 })
-    .withMessage('El teléfono no puede superar los 50 caracteres'),
+    .withMessage('El teléfono no puede superar los 50 caracteres')
+    .bail()
+    .custom(isValidPhone)
+    .withMessage(PHONE_MESSAGE),
   body('objetivoEntrenamiento')
     .optional({ nullable: true })
     .isString()
     .trim()
     .isLength({ max: 255 })
     .withMessage('El objetivo no puede superar los 255 caracteres'),
+  body('objetivoDiasRacha').custom(streakGoalRule).withMessage(STREAK_GOAL_MESSAGE),
   body('planId')
     .notEmpty()
     .withMessage('Seleccioná un plan')
@@ -67,15 +73,10 @@ export const updateClientValidator = [
   ...clientIdValidator,
   body('nombre').optional().trim().notEmpty().isLength({ max: 100 }),
   body('apellido').optional().trim().notEmpty().isLength({ max: 100 }),
-  body('telefono').optional({ nullable: true }).isString().trim().isLength({ max: 50 }),
+  body('telefono').optional({ nullable: true }).isString().trim().isLength({ max: 50 }).bail().custom(optionalPhoneRule),
   body('objetivoEntrenamiento').optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
   body('estadoClienteId').optional().isInt({ min: 1 }),
-];
-
-export const clearanceValidator = [
-  ...clientIdValidator,
-  body('archivo').trim().notEmpty().isLength({ max: 255 }),
-  body('fechaCarga').optional().isISO8601(),
+  body('objetivoDiasRacha').optional().custom(streakGoalRule).withMessage(STREAK_GOAL_MESSAGE),
 ];
 
 export const statusValidator = [

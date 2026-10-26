@@ -2,12 +2,14 @@ import { Router } from 'express';
 import { body } from 'express-validator';
 import * as authController from '../controllers/auth.controller.js';
 import { authenticateToken } from '../middlewares/auth.middleware.js';
+import { loginRateLimit } from '../middlewares/login-rate-limit.middleware.js';
 import { validateRequest } from '../middlewares/validate.middleware.js';
 
 const router = Router();
 
 router.post(
   '/login',
+  loginRateLimit,
   [
     body('email').trim().isEmail().withMessage('Email inválido'),
     body('password').isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres'),

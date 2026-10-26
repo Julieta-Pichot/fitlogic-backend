@@ -20,6 +20,8 @@ export const authenticateToken = async (req, _res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // Un token firmado pero sin un userId entero válido no identifica a nadie.
+    if (!Number.isInteger(decoded?.userId) || decoded.userId < 1) throw new UnauthorizedError('Token inválido');
 
     const user = await prisma.usuario.findUnique({
       where: { id: decoded.userId },
@@ -89,6 +91,40 @@ export const requireProfesorHabilitado = [
     }
   },
 ];
+
+// Rol CLIENTE: deja el registro del cliente (con su estado) en req.cliente. El cliente se identifica
+// siempre por el token (cliente.usuario_id -> usuario.id); nunca por un id enviado desde el front.
+// Un cliente INHABILITADO_PAGO o INHABILITADO_BAJA SÍ puede entrar: necesita ver su membresía y renovar.
+export const requireClienteContext = [
+  requireRole('CLIENTE'),
+  async (req, _res, next) => {
+    try {
+      const cliente = await prisma.cliente.findUnique({ where: { usuarioId: req.user.id }, include: { estadoCliente: true } });
+      if (!cliente) throw new ForbiddenError('Perfil de cliente no encontrado');
+      req.cliente = cliente;
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  },
+];
+
+// Rol RECEPCIONISTA + cuenta HABILITADA (estado_cuenta_staff), igual que el profesor. El admin pasa directo.
+const checkReceptionEnabled = async (req, _res, next) => {
+  try {
+    if (normalizeRoleName(req.user.rol?.nombre) !== 'recepcionista') return next();
+    const recepcionista = await prisma.recepcionista.findUnique({ where: { usuarioId: req.user.id }, include: { estadoCuentaStaff: true } });
+    if (!recepcionista) throw new ForbiddenError('Perfil de recepcionista no encontrado');
+    if (recepcionista.estadoCuentaStaff?.nombre !== 'HABILITADO') throw new ForbiddenError('Tu cuenta de recepción está inhabilitada');
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
+// Operaciones de caja y alta de clientes: solo ADMIN o RECEPCIONISTA habilitada (nunca el profesor ni el cliente).
+export const requireAdminOrReception = [requireRole('ADMIN', 'RECEPCIONISTA'), checkReceptionEnabled];
+export const requireReceptionEnabled = [requireRole('RECEPCIONISTA'), checkReceptionEnabled];
 
 export const requireAdmin = requireRole('ADMIN');
 export const requireProfesor = requireRole('PROFESOR');

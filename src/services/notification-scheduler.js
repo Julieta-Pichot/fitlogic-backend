@@ -1,6 +1,8 @@
 import prisma from '../lib/prisma.js';
 import { getClassOccurrences } from '../utils/class-schedule.js';
-import { GYM_TIMEZONE, formatGymTime } from '../utils/timezone.js';
+import { cleanupExpiredCheckouts, syncPendingCheckouts } from './membership-payments.service.js';
+import { computeMembership } from '../utils/membership.js';
+import { GYM_TIMEZONE, dbDateMs, diffDays, formatGymTime, gymTodayMs, msToIsoDate } from '../utils/timezone.js';
 
 const LEAD_MINUTES = 15;
 const CHECK_INTERVAL_MS = 60_000;
@@ -70,7 +72,71 @@ export const generateClassReminders = async (now = new Date()) => {
   return result.count;
 };
 
+// ---------------------------------------------------------------------------
+// Vencimientos del cliente: cuota y apto físico, 10 días antes.
+// ---------------------------------------------------------------------------
+
+const EXPIRY_WARNING_DAYS = 10;
+
+const ddmmyyyy = (isoDate) => isoDate.split('-').reverse().join('/');
+const whenText = (days) => (days === 0 ? 'hoy' : days === 1 ? 'mañana' : `en ${days} días`);
+
+// Se crea el aviso mientras 0 <= días restantes <= 10 y todavía no exista para esa cuota / ese vencimiento
+// (no depende de que el scheduler corra justo el día 10). La clave de deduplicación (cuota:<id>,
+// apto:<fecha>) + UNIQUE + INSERT IGNORE evita duplicados; una renovación o un apto nuevo generan clave nueva.
+export const generateExpiryReminders = async (now = new Date()) => {
+  const todayMs = gymTodayMs(now);
+  const clients = await prisma.cliente.findMany({
+    where: { estadoCliente: { nombre: { not: 'INHABILITADO_BAJA' } }, usuario: { activo: true } },
+    select: {
+      usuarioId: true,
+      aptoFisicoFechaVencimiento: true,
+      cuotas: { include: { plan: true, estadoCuota: true, pago: true } },
+    },
+  });
+
+  const data = [];
+  for (const client of clients) {
+    const membership = computeMembership(client.cuotas, now);
+    const quota = membership.cuota;
+    // Si ya hay una renovación paga que empieza al vencer, no hace falta avisar.
+    if (membership.estado === 'ACTIVA' && quota && quota.diasRestantes >= 0 && quota.diasRestantes <= EXPIRY_WARNING_DAYS) {
+      data.push({
+        usuarioId: client.usuarioId,
+        tipo: 'VENCIMIENTO_CUOTA',
+        claveDedup: `cuota:${quota.id}`,
+        titulo: quota.diasRestantes === 0 ? 'Tu membresía vence hoy' : 'Tu membresía está por vencer',
+        mensaje: `Tu plan ${quota.plan.nombre} vence ${whenText(quota.diasRestantes)} (${ddmmyyyy(quota.fechaVencimiento)}). Renová tu membresía para seguir entrenando.`,
+      });
+    }
+
+    if (client.aptoFisicoFechaVencimiento) {
+      const expires = dbDateMs(client.aptoFisicoFechaVencimiento);
+      const days = diffDays(todayMs, expires);
+      if (days >= 0 && days <= EXPIRY_WARNING_DAYS) {
+        const iso = msToIsoDate(expires);
+        data.push({
+          usuarioId: client.usuarioId,
+          tipo: 'VENCIMIENTO_APTO_FISICO',
+          claveDedup: `apto:${iso}`,
+          titulo: days === 0 ? 'Tu apto físico vence hoy' : 'Tu apto físico está por vencer',
+          mensaje: `Tu apto físico vence ${whenText(days)} (${ddmmyyyy(iso)}). Entregá uno nuevo en recepción.`,
+        });
+      }
+    }
+  }
+
+  if (data.length === 0) return 0;
+
+  const types = await prisma.tipoNotificacion.findMany({ where: { nombre: { in: ['VENCIMIENTO_CUOTA', 'VENCIMIENTO_APTO_FISICO'] } } });
+  const typeId = Object.fromEntries(types.map((type) => [type.nombre, type.id]));
+  const rows = data.filter((item) => typeId[item.tipo]).map(({ tipo, ...item }) => ({ ...item, tipoNotificacionId: typeId[tipo], fechaEnvio: now }));
+  const result = await prisma.notificacion.createMany({ data: rows, skipDuplicates: true });
+  return result.count;
+};
+
 let timer = null;
+let ticks = 0;
 let running = false;
 
 export const startNotificationScheduler = () => {
@@ -82,6 +148,23 @@ export const startNotificationScheduler = () => {
     try {
       const created = await generateClassReminders();
       if (created > 0) console.log(`[scheduler] ${created} aviso(s) de clase generados`);
+      // Los vencimientos son por día: alcanza con revisarlos cada 10 minutos (y al arrancar).
+      if (ticks % 10 === 0) {
+        const expiries = await generateExpiryReminders();
+        if (expiries > 0) console.log(`[scheduler] ${expiries} aviso(s) de vencimiento generados`);
+      }
+      // Pagos de Mercado Pago: sondeo cada 2 minutos (cubre webhooks que no llegan) y limpieza cada hora.
+      if (process.env.MERCADOPAGO_ACCESS_TOKEN?.trim()) {
+        if (ticks % 2 === 0) {
+          const activated = await syncPendingCheckouts();
+          if (activated > 0) console.log('[scheduler] ' + activated + ' pago(s) de Mercado Pago acreditados por sondeo');
+        }
+        if (ticks % 60 === 0) {
+          const cleaned = await cleanupExpiredCheckouts();
+          if (cleaned.removed || cleaned.marked) console.log('[scheduler] Checkouts vencidos: ' + cleaned.removed + ' eliminados, ' + cleaned.marked + ' marcados VENCIDA');
+        }
+      }
+      ticks += 1;
     } catch (error) {
       console.error('[scheduler] Error generando avisos de clase:', error.message);
     } finally {

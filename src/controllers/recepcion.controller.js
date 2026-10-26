@@ -1,3 +1,4 @@
+import * as quotasService from '../services/quotas.service.js';
 import * as recepcionService from '../services/recepcion.service.js';
 import { sendSuccess } from '../utils/response.js';
 
@@ -11,6 +12,10 @@ export const listRecentPayments = async (req, res, next) => {
 
 export const listActivePlans = async (_req, res, next) => {
   try { return sendSuccess(res, { data: await recepcionService.listActivePlans() }); } catch (error) { return next(error); }
+};
+
+export const registerPayment = async (req, res, next) => {
+  try { return sendSuccess(res, { message: 'Pago registrado', data: await quotasService.registerReceptionPayment(req.body), statusCode: 201 }); } catch (error) { return next(error); }
 };
 
 export const updateMyProfile = async (req, res, next) => {

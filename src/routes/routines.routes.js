@@ -7,7 +7,7 @@ import { createExerciseValidator, createRoutineValidator, routineIdValidator, up
 const router = Router();
 router.get('/me', authenticateToken, requireCliente, routinesController.listMyRoutines);
 router.get('/', authenticateToken, ...requireProfesorHabilitado, routinesController.listRoutines);
-router.get('/exercises', authenticateToken, routinesController.listExercises);
+router.get('/exercises', authenticateToken, ...requireProfesorHabilitado, routinesController.listExercises);
 router.post('/exercises', authenticateToken, ...requireProfesorHabilitado, createExerciseValidator, validateRequest, routinesController.createExercise);
 router.get('/:id', authenticateToken, ...requireProfesorHabilitado, routineIdValidator, validateRequest, routinesController.getRoutine);
 router.post('/', authenticateToken, ...requireProfesorHabilitado, createRoutineValidator, validateRequest, routinesController.createRoutine);

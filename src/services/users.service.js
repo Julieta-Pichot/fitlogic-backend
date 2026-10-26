@@ -1,3 +1,4 @@
+import { parseStreakGoal } from '../utils/streak-goal.js';
 import prisma from '../lib/prisma.js';
 import { ROLES } from '../constants/index.js';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors/AppError.js';
@@ -46,7 +47,8 @@ const createRoleProfile = async (tx, { rolId, usuarioId, especialidades, objetiv
       data: {
         usuarioId,
         estadoClienteId: await getClientStateId(tx),
-        objetivoDiasRacha: objetivoDiasSemana ?? 3,
+        // Sin valor queda NULL (sin objetivo definido): nunca se asume 3.
+        objetivoDiasRacha: parseStreakGoal(objetivoDiasSemana),
         fechaAlta: new Date(),
       },
     });
@@ -191,7 +193,7 @@ export const updateUser = async (_gimnasioId, actorId, userId, payload) => {
     if (payload.objetivoDiasSemana && user.cliente) {
       await tx.cliente.update({
         where: { id: user.cliente.id },
-        data: { objetivoDiasRacha: payload.objetivoDiasSemana },
+        data: { objetivoDiasRacha: parseStreakGoal(payload.objetivoDiasSemana) },
       });
     }
     return tx.usuario.update({ where: { id: userId }, data, include: userInclude });

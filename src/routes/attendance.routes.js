@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticateToken, requireCliente, requireStaff } from '../middlewares/auth.middleware.js';
+import { authenticateToken, requireAdminOrReception } from '../middlewares/auth.middleware.js';
 import { validateRequest } from '../middlewares/validate.middleware.js';
 import * as attendanceController from '../controllers/attendance.controller.js';
 import {
@@ -10,8 +10,9 @@ import {
 
 const router = Router();
 
-router.get('/', authenticateToken, requireStaff, listAttendanceValidator, validateRequest, attendanceController.listAttendance);
-router.get('/access/:clientId', authenticateToken, requireStaff, clientIdValidator, validateRequest, attendanceController.validateAccess);
-router.post('/', authenticateToken, registerAttendanceValidator, validateRequest, attendanceController.registerAttendance);
+router.get('/', authenticateToken, ...requireAdminOrReception, listAttendanceValidator, validateRequest, attendanceController.listAttendance);
+router.get('/access/:clientId', authenticateToken, ...requireAdminOrReception, clientIdValidator, validateRequest, attendanceController.validateAccess);
+// Solo caja/recepción registra asistencias: ni el profesor ni el propio cliente (evita "marcarse presente" desde su casa).
+router.post('/', authenticateToken, ...requireAdminOrReception, registerAttendanceValidator, validateRequest, attendanceController.registerAttendance);
 
 export default router;

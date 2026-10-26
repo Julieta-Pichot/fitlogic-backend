@@ -5,17 +5,34 @@ import prisma from '../lib/prisma.js';
 import { ConflictError, NotFoundError, ValidationError } from '../errors/AppError.js';
 import { UPLOADS_PATH } from '../middlewares/upload.middleware.js';
 import { toDateOnly } from '../utils/dates.js';
+import { detectDocumentType } from '../utils/file-signature.js';
+import { listPlans } from './membership-payments.service.js';
+import { parseStreakGoal } from '../utils/streak-goal.js';
 
 const clientInclude = {
   usuario: { include: { rol: true } },
   estadoCliente: true,
-  cuotas: { include: { plan: true, estadoCuota: true, pago: true }, orderBy: [{ fechaVencimiento: 'desc' }, { id: 'desc' }] },
+  cuotas: { include: { plan: true, estadoCuota: true, pago: true }, orderBy: [{ fechaInicio: 'desc' }, { id: 'desc' }] },
+};
+
+// Agrega a cada cuota PENDIENTE sin pago el `montoACobrar`: precio final calculado por el backend (plan + promoción vigente),
+// el mismo que cobra Mercado Pago. Es el importe que recepción debe registrar; el front no lo calcula.
+const attachAmountDue = async (value) => {
+  const clients = Array.isArray(value) ? value : [value];
+  const needsPricing = clients.some((client) => client.cuotas.some((quota) => quota.estadoCuota.nombre === 'PENDIENTE' && !quota.pago));
+  const prices = needsPricing ? new Map((await listPlans()).map((plan) => [plan.id, plan.precioFinal])) : new Map();
+  for (const client of clients) {
+    for (const quota of client.cuotas) {
+      if (quota.estadoCuota.nombre === 'PENDIENTE' && !quota.pago) quota.montoACobrar = prices.get(quota.planId) ?? Number(quota.plan.precio);
+    }
+  }
+  return value;
 };
 
 const getClient = async (clientId) => {
   const client = await prisma.cliente.findUnique({ where: { id: Number(clientId) }, include: clientInclude });
   if (!client) throw new NotFoundError('Cliente no encontrado');
-  return client;
+  return attachAmountDue(client);
 };
 
 const getStateId = async (name, db = prisma) => {
@@ -27,7 +44,7 @@ const getStateId = async (name, db = prisma) => {
 export const listClients = async (query = {}) => {
   const search = typeof query.search === 'string' ? query.search.trim() : '';
   const estadoClienteId = query.estadoClienteId ? Number(query.estadoClienteId) : undefined;
-  return prisma.cliente.findMany({
+  const found = await prisma.cliente.findMany({
     where: {
       ...(estadoClienteId ? { estadoClienteId } : {}),
       ...(search
@@ -41,6 +58,7 @@ export const listClients = async (query = {}) => {
     include: clientInclude,
     orderBy: { id: 'desc' },
   });
+  return attachAmountDue(found);
 };
 
 export const getClientById = (clientId) => getClient(clientId);
@@ -61,6 +79,8 @@ export const createClient = async (_actorId, payload = {}) => {
   }
   if (!String(payload.telefono ?? '').trim()) throw new ValidationError('El teléfono es obligatorio');
   if (!Number.isInteger(planId) || planId < 1) throw new ValidationError('El plan es obligatorio');
+  // Sin valor queda NULL ("sin objetivo definido"); nunca se asume 3.
+  const objetivoDiasRacha = parseStreakGoal(payload.objetivoDiasRacha);
   if (await prisma.usuario.findUnique({ where: { email } })) {
     throw new ConflictError('Ya existe un usuario con ese email');
   }
@@ -69,7 +89,7 @@ export const createClient = async (_actorId, payload = {}) => {
 
   // Usuario + Cliente + primera Cuota (siempre PENDIENTE) o nada: la confirmación
   // del pago es un paso posterior (POST /quotas/:id/confirm-payment).
-  return prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     const role = await tx.rol.findUnique({ where: { nombre: 'CLIENTE' } });
     if (!role) throw new ValidationError('No existe el rol CLIENTE');
     const plan = await tx.plan.findUnique({ where: { id: planId } });
@@ -93,7 +113,7 @@ export const createClient = async (_actorId, payload = {}) => {
         usuarioId: user.id,
         estadoClienteId: await getStateId('HABILITADO', tx),
         objetivoEntrenamiento: payload.objetivoEntrenamiento ? String(payload.objetivoEntrenamiento).trim() : null,
-        objetivoDiasRacha: 3,
+        objetivoDiasRacha,
         fechaAlta: new Date(),
       },
     });
@@ -113,12 +133,18 @@ export const createClient = async (_actorId, payload = {}) => {
 
     return tx.cliente.findUnique({ where: { id: cliente.id }, include: clientInclude });
   });
+  return attachAmountDue(created);
 };
 
 export const updateClient = async (clientId, payload = {}) => {
   await getClient(clientId);
   const data = {};
   if (payload.objetivoEntrenamiento !== undefined) data.objetivoEntrenamiento = String(payload.objetivoEntrenamiento).trim() || null;
+  if (payload.objetivoDiasRacha !== undefined) {
+    // En la edición el valor es obligatorio si se envía: 1 a 7.
+    data.objetivoDiasRacha = parseStreakGoal(payload.objetivoDiasRacha);
+    if (data.objetivoDiasRacha === null) throw new ValidationError('Los días de racha por semana deben ser un número entero entre 1 y 7', null, 'RACHA_INVALIDA');
+  }
   if (payload.estadoClienteId !== undefined) {
     const stateId = Number(payload.estadoClienteId);
     if (!await prisma.estadoCliente.findUnique({ where: { id: stateId } })) throw new ValidationError('Estado de cliente inválido');
@@ -139,24 +165,6 @@ export const updateClient = async (clientId, payload = {}) => {
   return getClient(clientId);
 };
 
-export const updateMedicalClearance = async (clientId, archivo, fechaCarga = new Date()) => {
-  if (!archivo) throw new ValidationError('El archivo del apto físico es obligatorio');
-  const loadedAt = new Date(fechaCarga);
-  if (Number.isNaN(loadedAt.getTime())) throw new ValidationError('La fecha de carga es inválida');
-  const expiresAt = new Date(loadedAt);
-  expiresAt.setFullYear(expiresAt.getFullYear() + 1);
-  await getClient(clientId);
-  return prisma.cliente.update({
-    where: { id: Number(clientId) },
-    data: {
-      aptoFisicoArchivo: String(archivo),
-      aptoFisicoFechaCarga: loadedAt,
-      aptoFisicoFechaVencimiento: expiresAt,
-    },
-    include: clientInclude,
-  });
-};
-
 const removeUploadedFile = async (relativePath) => {
   if (!relativePath) return;
   const target = path.resolve(UPLOADS_PATH, relativePath);
@@ -168,6 +176,19 @@ const removeUploadedFile = async (relativePath) => {
 // vencimiento hoy + 1 año, ambos calculados acá (nunca vienen del cliente).
 export const uploadMedicalClearance = async (clientId, file) => {
   if (!file) throw new ValidationError('Seleccioná el archivo del apto físico (PDF, JPG, PNG o WEBP)');
+
+  // El tipo se verifica por el CONTENIDO (firma del archivo) y la extensión final la decide el servidor: un ejecutable o un
+  // HTML con nombre/Content-Type falsos se rechaza y se borra.
+  const detected = await detectDocumentType(file.path);
+  if (!detected) {
+    await fs.unlink(file.path).catch(() => undefined);
+    throw new ValidationError('El archivo no es un PDF, JPG, PNG o WEBP válido');
+  }
+  const canonicalPath = path.join(path.dirname(file.path), path.parse(file.path).name + detected.ext);
+  if (canonicalPath !== file.path) {
+    await fs.rename(file.path, canonicalPath);
+    file.path = canonicalPath;
+  }
   const storedPath = path.relative(UPLOADS_PATH, file.path).split(path.sep).join('/');
 
   let previous;
@@ -202,11 +223,11 @@ export const uploadMedicalClearance = async (clientId, file) => {
   if (previous.aptoFisicoArchivo && previous.aptoFisicoArchivo !== storedPath) {
     await removeUploadedFile(previous.aptoFisicoArchivo);
   }
-  return updated;
+  return attachAmountDue(updated);
 };
 
 export const changeClientStatus = async (clientId, statusName) => {
   const stateId = await getStateId(statusName);
   await getClient(clientId);
-  return prisma.cliente.update({ where: { id: Number(clientId) }, data: { estadoClienteId: stateId }, include: clientInclude });
+  return attachAmountDue(await prisma.cliente.update({ where: { id: Number(clientId) }, data: { estadoClienteId: stateId }, include: clientInclude }));
 };

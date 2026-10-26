@@ -6,7 +6,8 @@ const recipeBodyRules = [
   body('nombre').trim().notEmpty().withMessage('El nombre de la receta es obligatorio').isLength({ max: 150 }),
   body('categoriaRecetaId').isInt({ min: 1 }).withMessage('Elegí una categoría'),
   body('descripcion').optional({ nullable: true }).isString(),
-  body('calorias').optional({ nullable: true, values: 'falsy' }).isInt({ min: 0, max: 100000 }),
+  // La información nutricional completa se valida en el servicio (utils/nutrition.js), que devuelve el mensaje exacto.
+  body('otroDatoNutricional').optional({ nullable: true }).isString().isLength({ max: 150 }),
   body('tiempoPreparacion').optional({ nullable: true, values: 'falsy' }).isInt({ min: 0, max: 10000 }),
   body('ingredientes').optional().isArray(),
   body('pasos').optional().isArray(),
