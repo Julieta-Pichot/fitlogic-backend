@@ -4,6 +4,7 @@ node_modules/
 # Variables de entorno (contienen credenciales: DATABASE_URL, JWT_SECRET, etc.)
 .env
 .env.local
+.env.example
 .env.*.local
 
 # Archivos subidos en runtime (aptos físicos, etc.).
