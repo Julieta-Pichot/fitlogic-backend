@@ -87,16 +87,35 @@ const logMercadoPagoConfig = () => {
   if (!process.env.MERCADOPAGO_WEBHOOK_SECRET?.trim()) console.warn('[mercadopago] Sin MERCADOPAGO_WEBHOOK_SECRET: no se valida la firma x-signature del webhook.');
 };
 
+// Si la base no responde al arrancar (ej.: un servicio gratuito dormido), se reintenta con espera creciente
+// y el scheduler se inicia recién cuando el esquema se pudo verificar. El servidor HTTP ya está levantado.
+const SCHEMA_RETRY_DELAYS_MS = [5_000, 10_000, 20_000, 40_000, 80_000];
+let schemaRetryTimer = null;
+
+const startWhenSchemaReady = async (attempt = 0) => {
+  const ok = await verifySchemaOnStartup();
+  if (ok) {
+    if (process.env.DISABLE_SCHEDULER !== 'true') startNotificationScheduler();
+    return;
+  }
+  if (attempt >= SCHEMA_RETRY_DELAYS_MS.length) {
+    console.error('[schema] Se agotaron los reintentos: el scheduler no se inició. Revisá la conexión a la base y las migraciones, y reiniciá el servicio.');
+    return;
+  }
+  const delay = SCHEMA_RETRY_DELAYS_MS[attempt];
+  console.warn(`[schema] Reintento ${attempt + 1}/${SCHEMA_RETRY_DELAYS_MS.length} en ${delay / 1000}s...`);
+  schemaRetryTimer = setTimeout(() => startWhenSchemaReady(attempt + 1), delay);
+};
+
 const server = app.listen(PORT, () => {
   console.log(`FitLogic API escuchando en puerto ${PORT}`);
   logMercadoPagoConfig();
-  verifySchemaOnStartup().then((ok) => {
-    if (ok && process.env.DISABLE_SCHEDULER !== 'true') startNotificationScheduler();
-  });
+  startWhenSchemaReady();
 });
 
 const shutdown = async (signal) => {
   console.log(`${signal} recibido. Cerrando servidor...`);
+  clearTimeout(schemaRetryTimer);
   stopNotificationScheduler();
   server.close(async () => {
     await prisma.$disconnect();
