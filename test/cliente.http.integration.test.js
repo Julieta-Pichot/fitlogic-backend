@@ -279,7 +279,13 @@ guard('admin /api/admin/ingresos/*: solo ADMIN (401/403), resumen, desglose, grÃ
     const report = await api(`/admin/ingresos/conciliacion?desde=2026-01-01&hasta=2027-12-31`, { auth: adminToken });
     assert.equal(report.status, 200);
     assert.equal(report.data.soloLectura, true);
-    assert.ok(report.data.localSinPagoEnMp.some((row) => row.referenciaExterna?.startsWith('800000')));
+    // El pago de MP de la cuota anterior lo crea el fixture con una referencia que depende de la etiqueta del test:
+    // se toma de la base (cliente 'ci', cuota VENCIDA) en vez de hardcodear el prefijo.
+    const fixturePago = await prisma.pago.findFirst({
+      where: { cuota: { clienteId: demo.clienteId, estadoCuota: { nombre: 'VENCIDA' } }, metodoPago: { nombre: 'MERCADO_PAGO' } },
+    });
+    assert.ok(fixturePago?.referenciaExterna, 'el fixture debe tener un pago de Mercado Pago en la cuota anterior');
+    assert.ok(report.data.localSinPagoEnMp.some((row) => row.referenciaExterna === fixturePago.referenciaExterna));
   } finally {
     await prisma.usuario.delete({ where: { id: admin.id } });
   }
