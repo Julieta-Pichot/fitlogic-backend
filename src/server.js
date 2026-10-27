@@ -12,6 +12,15 @@ import { startNotificationScheduler, stopNotificationScheduler } from './service
 
 dotenv.config();
 
+// En producción el servidor no arranca sin estas variables (mejor fallar al inicio que en el primer login/consulta).
+if (process.env.NODE_ENV === 'production') {
+  const missing = ['JWT_SECRET', 'DATABASE_URL'].filter((name) => !process.env[name]?.trim());
+  if (missing.length > 0) {
+    console.error(`[config] Faltan variables de entorno obligatorias en producción: ${missing.join(', ')}. Definilas en el panel del servicio y reiniciá.`);
+    process.exit(1);
+  }
+}
+
 const app = express();
 const STARTED_AT = new Date();
 const PORT = process.env.PORT || 3001;
