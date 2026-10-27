@@ -266,7 +266,7 @@ model MpEventoPago {
   payloadResumen  Json?    @map("payload_resumen")
   fechaRecepcion  DateTime @default(now()) @map("fecha_recepcion")
 
-  cuota Cuota? @relation(fields: [cuotaId], references: [id])
+  cuota Cuota? @relation(fields: [cuotaId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_mp_evento_cuota")
 
   @@map("mp_evento_pago")
   @@index([mpPaymentId], map: "idx_mp_evento_payment")
@@ -433,10 +433,10 @@ model ClaseDia {
   claseId    Int @map("clase_id")
   diaSemana  Int @map("dia_semana")
 
-  clase Clase @relation(fields: [claseId], references: [id])
+  clase Clase @relation(fields: [claseId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_clase_dia_clase")
 
   @@map("clase_dia")
-  @@unique([claseId, diaSemana])
+  @@unique([claseId, diaSemana], map: "uq_clase_dia")
 }
 
 // Catálogo de estados de inscripción (Grupo A: tabla, no enum).
@@ -575,7 +575,7 @@ model Notificacion {
 
   usuario          Usuario          @relation(fields: [usuarioId], references: [id])
   tipoNotificacion TipoNotificacion @relation(fields: [tipoNotificacionId], references: [id])
-  clase            Clase?           @relation(fields: [claseId], references: [id])
+  clase            Clase?           @relation(fields: [claseId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_notificacion_clase")
 
   @@map("notificacion")
   @@index([usuarioId, leida])
