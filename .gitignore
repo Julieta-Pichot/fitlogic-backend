@@ -4,8 +4,21 @@ node_modules/
 # Variables de entorno (contienen credenciales: DATABASE_URL, JWT_SECRET, etc.)
 .env
 .env.local
-.env.example
 .env.*.local
+# La plantilla .env.example SÍ se versiona
+!.env.example
+
+# Certificados y claves (ej.: ca.pem de Aiven)
+*.pem
+*.key
+ca.pem
+
+# Dumps y backups de base de datos (pueden contener datos reales)
+*.dump
+*.bak
+*.backup
+*dump*.sql
+*backup*.sql
 
 # Archivos subidos en runtime (aptos físicos, etc.).
 # La carpeta se recrea sola: upload.middleware.js la crea con fs.mkdirSync
