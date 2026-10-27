@@ -59,8 +59,20 @@ const getPlanPrice = async (planId, now) => {
 
 const publicUrl = (value) => String(value ?? '').trim().replace(/\/$/, '');
 
+// URL del front para las back_urls: FRONTEND_PUBLIC_URL o, si no, el primer valor de FRONTEND_URL (admite lista por comas).
+// En producción no hay fallback a localhost: si falta la variable, el checkout falla con un error claro.
+const frontendBaseUrl = ({ required = false } = {}) => {
+  const url = publicUrl(process.env.FRONTEND_PUBLIC_URL || process.env.FRONTEND_URL?.split(',')[0]);
+  if (url) return url;
+  if (!required) return '';
+  if (process.env.NODE_ENV === 'production') {
+    throw new AppError('Falta configurar FRONTEND_URL (o FRONTEND_PUBLIC_URL) en el servidor: no se puede armar el retorno de Mercado Pago.', 500, null, 'CONFIG_FALTANTE');
+  }
+  return 'http://localhost:5173';
+};
+
 const buildPreference = ({ plan, cuota, user, cliente, now, expiresAt }) => {
-  const frontend = publicUrl(process.env.FRONTEND_PUBLIC_URL || process.env.FRONTEND_URL || 'http://localhost:5173');
+  const frontend = frontendBaseUrl({ required: true });
   const backend = publicUrl(process.env.BACKEND_PUBLIC_URL);
   const back = `${frontend}${RESULT_PATH}`;
 
@@ -281,7 +293,7 @@ export const processPayment = async (payment, { origin = 'VERIFICACION', now = n
 
 // Configuración del retorno: sin URLs https públicas Mercado Pago no devuelve al usuario ni avisa por webhook.
 export const getCheckoutConfig = () => {
-  const frontend = publicUrl(process.env.FRONTEND_PUBLIC_URL || process.env.FRONTEND_URL);
+  const frontend = frontendBaseUrl();
   const backend = publicUrl(process.env.BACKEND_PUBLIC_URL);
   return { retornoAutomatico: frontend.startsWith('https://'), webhookActivo: backend.startsWith('https://') };
 };
