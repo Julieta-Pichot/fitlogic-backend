@@ -52,7 +52,7 @@ CREATE TABLE `cliente` (
     `estado_cliente_id` INTEGER NOT NULL,
     `objetivo_entrenamiento` VARCHAR(255) NULL,
     `objetivo_dias_racha` INTEGER NOT NULL DEFAULT 3,
-    `fecha_alta` DATE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `fecha_alta` DATE NOT NULL DEFAULT (CURRENT_DATE),
     `apto_fisico_archivo` VARCHAR(255) NULL,
     `apto_fisico_fecha_carga` DATE NULL,
     `apto_fisico_fecha_vencimiento` DATE NULL,
@@ -181,7 +181,7 @@ CREATE TABLE `rutina` (
     `duracion_estimada` INTEGER NULL,
     `nivel_dificultad` VARCHAR(50) NULL,
     `activa` BOOLEAN NOT NULL DEFAULT true,
-    `fecha_asignacion` DATE NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `fecha_asignacion` DATE NOT NULL DEFAULT (CURRENT_DATE),
 
     INDEX `rutina_cliente_id_activa_idx`(`cliente_id`, `activa`),
     PRIMARY KEY (`id`)
