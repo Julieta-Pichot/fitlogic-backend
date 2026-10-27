@@ -23,6 +23,13 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
+// Este seed crea usuarios de prueba con contraseña conocida: jamás en producción.
+// Para el primer administrador real usá `npm run create-admin`.
+if (process.env.NODE_ENV === 'production') {
+  console.error('[seed] Rechazado: NODE_ENV=production. Este seed crea usuarios de prueba con contraseña 123456. Usá `npm run create-admin` para crear el administrador.');
+  process.exit(1);
+}
+
 const prisma = new PrismaClient();
 
 const PASSWORD_DEMO = '123456';
