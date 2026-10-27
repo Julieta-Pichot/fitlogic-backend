@@ -16,19 +16,19 @@ const app = express();
 const STARTED_AT = new Date();
 const PORT = process.env.PORT || 3001;
 
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-];
+const isProduction = process.env.NODE_ENV === 'production';
+// Los orígenes de localhost solo se aceptan fuera de producción.
+const allowedOrigins = isProduction ? [] : ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5173', 'http://127.0.0.1:5173'];
 // En desarrollo, Vite pasa a otro puerto (5174, 5175...) si el 5173 está ocupado: se acepta cualquier puerto de localhost.
-const isDevLocalOrigin = (origin) => process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(origin);
+const isDevLocalOrigin = (origin) => !isProduction && /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(origin);
 
+// FRONTEND_URL admite varios orígenes separados por coma (ej.: producción y previews de Vercel).
 // FRONTEND_PUBLIC_URL: URL https del front (túnel) usada en las back_urls de Mercado Pago.
 for (const value of [process.env.FRONTEND_URL, process.env.FRONTEND_PUBLIC_URL]) {
-  const origin = value?.trim().replace(/\/$/, '');
-  if (origin && !allowedOrigins.includes(origin)) allowedOrigins.push(origin);
+  for (const item of value?.split(',') ?? []) {
+    const origin = item.trim().replace(/\/$/, '');
+    if (origin && !allowedOrigins.includes(origin)) allowedOrigins.push(origin);
+  }
 }
 
 app.use(
@@ -36,7 +36,6 @@ app.use(
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin) || isDevLocalOrigin(origin)) return callback(null, true);
-      if (origin.endsWith('.vercel.app')) return callback(null, true);
       // Origen no permitido: sin cabeceras CORS (el navegador lo bloquea). No es un error del servidor, así que no se responde 500.
       return callback(null, false);
     },
