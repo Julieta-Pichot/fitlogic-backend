@@ -165,6 +165,26 @@ prisma/
 uploads/         # Archivos subidos en runtime (aptos físicos). No se versiona.
 ```
 
+## Deploy (Render + Aiven MySQL)
+
+1. **Build command:** `npm ci` (el `postinstall` ejecuta `prisma generate`). **Start command:** `npm start`.
+   Health check: `/api/health`.
+2. **Variables de entorno** (ver `.env.example`): `DATABASE_URL` (con `sslaccept=strict`, `sslcert=/etc/secrets/ca.pem`
+   y `connection_limit=5`), `JWT_SECRET`, `FRONTEND_URL` (lista separada por coma), `NODE_ENV=production` y las de
+   Mercado Pago. En producción el servidor no arranca sin `JWT_SECRET` ni `DATABASE_URL`.
+3. **Esquema:** `npx prisma migrate deploy` (contra la base de Aiven).
+4. **Primer administrador:** `ADMIN_EMAIL=... ADMIN_PASSWORD=... npm run create-admin` (10+ caracteres). `npm run db:seed`
+   crea usuarios de prueba con contraseña conocida y se niega a correr con `NODE_ENV=production`.
+
+### Limitaciones conocidas del plan gratuito de Render
+
+- **Archivos subidos:** los aptos físicos y las fotos de recetas se guardan en el disco del servidor (`uploads/`). El disco
+  del plan gratuito es efímero: **esos archivos se pierden en cada deploy o reinicio**. Solucionarlo requiere almacenamiento
+  externo (S3, Cloudinary, etc.); por ahora no está implementado.
+- **Servicio dormido:** tras 15 minutos sin tráfico el servicio se duerme. Mientras duerme no corre el scheduler (avisos de
+  clase y de vencimiento, sondeo de pagos de Mercado Pago); los pagos se acreditan igual por webhook o con "Ya pagué,
+  verificar". Los contadores del límite de intentos de login (en memoria) se reinician.
+
 ---
 
 Proyecto desarrollado como Práctica Profesionalizante (Programación sobre

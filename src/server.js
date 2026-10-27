@@ -12,23 +12,32 @@ import { startNotificationScheduler, stopNotificationScheduler } from './service
 
 dotenv.config();
 
+// En producción el servidor no arranca sin estas variables (mejor fallar al inicio que en el primer login/consulta).
+if (process.env.NODE_ENV === 'production') {
+  const missing = ['JWT_SECRET', 'DATABASE_URL'].filter((name) => !process.env[name]?.trim());
+  if (missing.length > 0) {
+    console.error(`[config] Faltan variables de entorno obligatorias en producción: ${missing.join(', ')}. Definilas en el panel del servicio y reiniciá.`);
+    process.exit(1);
+  }
+}
+
 const app = express();
 const STARTED_AT = new Date();
 const PORT = process.env.PORT || 3001;
 
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-];
+const isProduction = process.env.NODE_ENV === 'production';
+// Los orígenes de localhost solo se aceptan fuera de producción.
+const allowedOrigins = isProduction ? [] : ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5173', 'http://127.0.0.1:5173'];
 // En desarrollo, Vite pasa a otro puerto (5174, 5175...) si el 5173 está ocupado: se acepta cualquier puerto de localhost.
-const isDevLocalOrigin = (origin) => process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(origin);
+const isDevLocalOrigin = (origin) => !isProduction && /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(origin);
 
+// FRONTEND_URL admite varios orígenes separados por coma (ej.: producción y previews de Vercel).
 // FRONTEND_PUBLIC_URL: URL https del front (túnel) usada en las back_urls de Mercado Pago.
 for (const value of [process.env.FRONTEND_URL, process.env.FRONTEND_PUBLIC_URL]) {
-  const origin = value?.trim().replace(/\/$/, '');
-  if (origin && !allowedOrigins.includes(origin)) allowedOrigins.push(origin);
+  for (const item of value?.split(',') ?? []) {
+    const origin = item.trim().replace(/\/$/, '');
+    if (origin && !allowedOrigins.includes(origin)) allowedOrigins.push(origin);
+  }
 }
 
 app.use(
@@ -36,7 +45,6 @@ app.use(
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin) || isDevLocalOrigin(origin)) return callback(null, true);
-      if (origin.endsWith('.vercel.app')) return callback(null, true);
       // Origen no permitido: sin cabeceras CORS (el navegador lo bloquea). No es un error del servidor, así que no se responde 500.
       return callback(null, false);
     },
@@ -88,16 +96,35 @@ const logMercadoPagoConfig = () => {
   if (!process.env.MERCADOPAGO_WEBHOOK_SECRET?.trim()) console.warn('[mercadopago] Sin MERCADOPAGO_WEBHOOK_SECRET: no se valida la firma x-signature del webhook.');
 };
 
+// Si la base no responde al arrancar (ej.: un servicio gratuito dormido), se reintenta con espera creciente
+// y el scheduler se inicia recién cuando el esquema se pudo verificar. El servidor HTTP ya está levantado.
+const SCHEMA_RETRY_DELAYS_MS = [5_000, 10_000, 20_000, 40_000, 80_000];
+let schemaRetryTimer = null;
+
+const startWhenSchemaReady = async (attempt = 0) => {
+  const ok = await verifySchemaOnStartup();
+  if (ok) {
+    if (process.env.DISABLE_SCHEDULER !== 'true') startNotificationScheduler();
+    return;
+  }
+  if (attempt >= SCHEMA_RETRY_DELAYS_MS.length) {
+    console.error('[schema] Se agotaron los reintentos: el scheduler no se inició. Revisá la conexión a la base y las migraciones, y reiniciá el servicio.');
+    return;
+  }
+  const delay = SCHEMA_RETRY_DELAYS_MS[attempt];
+  console.warn(`[schema] Reintento ${attempt + 1}/${SCHEMA_RETRY_DELAYS_MS.length} en ${delay / 1000}s...`);
+  schemaRetryTimer = setTimeout(() => startWhenSchemaReady(attempt + 1), delay);
+};
+
 const server = app.listen(PORT, () => {
   console.log(`FitLogic API escuchando en puerto ${PORT}`);
   logMercadoPagoConfig();
-  verifySchemaOnStartup().then((ok) => {
-    if (ok && process.env.DISABLE_SCHEDULER !== 'true') startNotificationScheduler();
-  });
+  startWhenSchemaReady();
 });
 
 const shutdown = async (signal) => {
   console.log(`${signal} recibido. Cerrando servidor...`);
+  clearTimeout(schemaRetryTimer);
   stopNotificationScheduler();
   server.close(async () => {
     await prisma.$disconnect();
