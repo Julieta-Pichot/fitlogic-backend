@@ -128,8 +128,8 @@ async function main() {
     await prisma.gimnasio.create({
       data: {
         nombre: 'FitLogic',
-        direccion: 'A definir por el administrador',
-        telefono: 'A definir por el administrador',
+        direccion: 'Buenos Aires 3379',
+        telefono: '11 1234-5678',
         emailSoporte: 'soporte@fitlogic.com',
         identidadVisual: null,
       },
@@ -150,23 +150,6 @@ async function main() {
 
   const estadoClienteHabilitado = estadosCliente.find((e) => e.nombre === 'HABILITADO');
   const estadoStaffHabilitado = estadosStaff.find((e) => e.nombre === 'HABILITADO');
-
-  // --------------------------------------------------------------------
-  // 4. ADMINISTRADOR (único, sin fila de rol propia)
-  // --------------------------------------------------------------------
-
-  await prisma.usuario.upsert({
-    where: { email: 'admin@fitlogic.com' },
-    update: {}, // nunca se pisa la contraseña de un usuario que ya existe
-    create: {
-      rolId: rolAdmin.id,
-      nombre: 'Admin',
-      apellido: 'FitLogic',
-      email: 'admin@fitlogic.com',
-      passwordHash,
-      activo: true,
-    },
-  });
 
   // --------------------------------------------------------------------
   // 5. PROFESOR DE PRUEBA
