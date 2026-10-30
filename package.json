@@ -14,6 +14,8 @@
     "db:seed": "node prisma/seed.js",
     "db:seed:ejercicios": "node prisma/seed-ejercicios.js",
     "db:seed:planes": "node prisma/seed-planes.js",
+    "db:migrate:pendientes": "prisma db execute --file db/migrations/009_normalizar_cuotas_pendientes.sql --schema prisma/schema.prisma",
+    "db:rollback:pendientes": "prisma db execute --file db/migrations/rollback/009_normalizar_cuotas_pendientes.down.sql --schema prisma/schema.prisma",
     "create-admin": "node scripts/create-admin.js",
     "db:migrate:profesor": "prisma db execute --file db/migrations/001_panel_profesor.sql --schema prisma/schema.prisma && prisma db execute --file db/migrations/002_duracion_clase.sql --schema prisma/schema.prisma && prisma db execute --file db/migrations/003_panel_cliente.sql --schema prisma/schema.prisma && prisma db execute --file db/migrations/004_receta_nutricion.sql --schema prisma/schema.prisma && prisma db execute --file db/migrations/005_racha_nullable.sql --schema prisma/schema.prisma && prisma db execute --file db/migrations/006_pagos_realismo.sql --schema prisma/schema.prisma && prisma db execute --file db/migrations/007_cuota_checkout_mp.sql --schema prisma/schema.prisma && prisma db execute --file db/migrations/008_alinear_precision_fechas.sql --schema prisma/schema.prisma",
     "test": "node --test",

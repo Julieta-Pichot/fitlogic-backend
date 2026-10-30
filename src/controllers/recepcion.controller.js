@@ -6,6 +6,10 @@ export const getDashboardStats = async (_req, res, next) => {
   try { return sendSuccess(res, { data: await recepcionService.getDashboardStats() }); } catch (error) { return next(error); }
 };
 
+export const listPendingPayments = async (_req, res, next) => {
+  try { return sendSuccess(res, { data: await recepcionService.listPendingPayments() }); } catch (error) { return next(error); }
+};
+
 export const listRecentPayments = async (req, res, next) => {
   try { return sendSuccess(res, { data: await recepcionService.listRecentPayments(Number(req.query.limit ?? 10)) }); } catch (error) { return next(error); }
 };

@@ -1,9 +1,9 @@
 import prisma from '../lib/prisma.js';
 import { AppError, ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors/AppError.js';
-import { quotaPeriod } from '../utils/membership.js';
+import { assertCanPay, computeMembershipStatus, quotaPeriod } from '../utils/membership.js';
 import { dbDateMs, gymTodayMs, msToIsoDate } from '../utils/timezone.js';
 import * as mercadopago from './mercadopago.service.js';
-import { activateQuota } from './quota-activation.service.js';
+import { activateQuota, supersedePendingQuotas } from './quota-activation.service.js';
 import { buildReceipt } from './payment-receipts.service.js';
 
 const RESULT_PATH = '/home/cliente/pago/resultado';
@@ -102,6 +102,13 @@ const buildPreference = ({ plan, cuota, user, cliente, now, expiresAt }) => {
   };
 };
 
+// Al cambiar de plan, el intento de pago del plan anterior queda invalidado: se vence su preferencia en Mercado Pago.
+// Es un mejor esfuerzo (si MP no responde, la cuota igual ya no figura como pendiente); un pago ya en curso
+// (p. ej. un cupón de efectivo) se sigue acreditando contra SU plan, nunca contra el nuevo.
+export const expirePreferences = async (preferenceIds = []) => {
+  await Promise.all(preferenceIds.map((id) => mercadopago.expirePreference(id).catch((error) => console.warn(`[mercadopago] No se pudo vencer la preferencia ${id}: ${error.message}`))));
+};
+
 // Crea (o reutiliza) la cuota PENDIENTE del plan elegido y la preferencia de Mercado Pago.
 // El monto SIEMPRE lo calcula el backend; del front solo llega plan_id.
 // Solo se reutilizan cuotas creadas por un checkout anterior (mp_expira_en): las pendientes del alta en
@@ -113,8 +120,11 @@ export const createCheckout = async (cliente, user, planId, now = new Date()) =>
   const plan = await getPlanPrice(planId, now);
   const expiresAt = new Date(now.getTime() + PREFERENCE_TTL_MS);
 
+  let replacedPreferences = [];
   const cuota = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM cliente WHERE id = ${cliente.id} FOR UPDATE`;
+    // Misma regla que recepción: con la membresía vigente y más de DIAS_ANTICIPACION_RENOVACION días no se puede renovar.
+    assertCanPay(computeMembershipStatus(await tx.cuota.findMany({ where: { clienteId: cliente.id }, include: { plan: true, estadoCuota: true, pago: true } }), now), { propio: true });
     const pending = await tx.estadoCuota.findUnique({ where: { nombre: 'PENDIENTE' } });
     if (!pending) throw new ValidationError('No existe el estado de cuota PENDIENTE');
 
@@ -122,13 +132,17 @@ export const createCheckout = async (cliente, user, planId, now = new Date()) =>
       where: { clienteId: cliente.id, planId: plan.id, estadoCuotaId: pending.id, pago: { is: null }, mpExpiraEn: { not: null } },
       orderBy: { id: 'desc' },
     });
-    if (existing) return tx.cuota.update({ where: { id: existing.id }, data: { mpExpiraEn: expiresAt } });
-
     // Fechas provisorias: las definitivas se fijan el día en que se aprueba el pago.
-    return tx.cuota.create({
-      data: { clienteId: cliente.id, planId: plan.id, estadoCuotaId: pending.id, mpExpiraEn: expiresAt, ...quotaPeriod(now, plan.duracionDias) },
-    });
+    const target = existing
+      ? await tx.cuota.update({ where: { id: existing.id }, data: { mpExpiraEn: expiresAt } })
+      : await tx.cuota.create({
+          data: { clienteId: cliente.id, planId: plan.id, estadoCuotaId: pending.id, mpExpiraEn: expiresAt, ...quotaPeriod(now, plan.duracionDias) },
+        });
+    // El plan elegido ahora reemplaza a cualquier solicitud pendiente anterior (incluida la del alta en recepción).
+    replacedPreferences = await supersedePendingQuotas(tx, cliente.id, target.id);
+    return target;
   });
+  await expirePreferences(replacedPreferences);
 
   const preference = await mercadopago.createPreference(buildPreference({ plan, cuota, user, cliente, now, expiresAt }));
   const useSandbox = process.env.MERCADOPAGO_USE_SANDBOX_URL === 'true';
@@ -377,11 +391,16 @@ export const verifyReturn = async (cliente, { payment_id: paymentId, collection_
 export const discardRequest = async (cliente, quotaId, now = new Date()) => {
   const cuota = await prisma.cuota.findFirst({
     where: { id: Number(quotaId), clienteId: cliente.id, pago: { is: null }, estadoCuota: { nombre: 'PENDIENTE' } },
-    select: { id: true },
+    select: { id: true, mpExpiraEn: true, mpPreferenceId: true },
   });
   if (!cuota) throw new NotFoundError('No encontramos esa solicitud pendiente', 'SOLICITUD_NO_ENCONTRADA');
 
-  const payment = await findPaymentOfQuota(cuota.id);
+  // Una solicitud del alta en recepción nunca pasó por Mercado Pago: si la consulta falla, igual se puede descartar.
+  const online = Boolean(cuota.mpExpiraEn || cuota.mpPreferenceId);
+  const payment = await findPaymentOfQuota(cuota.id).catch((error) => {
+    if (online) throw error;
+    return null;
+  });
   if (payment) {
     const outcome = paymentOutcome(payment.status);
     if (outcome === 'APROBADO') return processPayment(payment, { origin: 'VERIFICACION', now });

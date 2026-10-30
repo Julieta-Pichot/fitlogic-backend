@@ -4,10 +4,11 @@ import prisma from '../lib/prisma.js';
 import { NotFoundError } from '../errors/AppError.js';
 import { UPLOADS_PATH } from '../middlewares/upload.middleware.js';
 import { buildPaginatedResponse, parsePaginationParams } from '../utils/pagination.js';
-import { computeMembership } from '../utils/membership.js';
+import { computeMembershipStatus } from '../utils/membership.js';
 import { dbDateMs, diffDays, getGymParts, gymDateKey, gymTodayMs, gymWallTimeToDate, msToIsoDate, shiftCalendarDay } from '../utils/timezone.js';
 import { getNextClass } from './cliente-classes.service.js';
 import { listTodayRoutines } from './cliente-content.service.js';
+import { listPlans } from './membership-payments.service.js';
 
 const APTO_WARNING_DAYS = 10;
 
@@ -17,7 +18,12 @@ export const getMembership = async (cliente, now = new Date()) => {
     include: { plan: true, estadoCuota: true, pago: true },
     orderBy: { fechaVencimiento: 'desc' },
   });
-  return computeMembership(cuotas, now);
+  const membership = computeMembershipStatus(cuotas, now);
+  if (!membership.pendiente) return membership;
+
+  // Monto a pagar del plan elegido: precio vigente con promoción, el mismo que cobra recepción y Mercado Pago.
+  const priced = (await listPlans(now)).find((plan) => plan.id === membership.pendiente.plan.id);
+  return { ...membership, pendiente: { ...membership.pendiente, monto: priced ? priced.precioFinal : membership.pendiente.plan.precio } };
 };
 
 // Semana en curso (lunes a domingo, hora del gimnasio). Cada día con al menos una asistencia cuenta

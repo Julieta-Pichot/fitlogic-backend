@@ -125,7 +125,7 @@ guard('aprobado: pago con bruto/neto/comisión/medio, cuota ACTIVA, cuota anteri
   const active = await prisma.estadoCuota.findUnique({ where: { nombre: 'ACTIVA' } });
   const dayMs = 86_400_000;
   const today = gymTodayMs();
-  const previous = await prisma.cuota.create({ data: { clienteId: c.id, planId: plan.id, estadoCuotaId: active.id, fechaInicio: new Date(today - 10 * dayMs), fechaVencimiento: new Date(today + 20 * dayMs) } });
+  const previous = await prisma.cuota.create({ data: { clienteId: c.id, planId: plan.id, estadoCuotaId: active.id, fechaInicio: new Date(today - 28 * dayMs), fechaVencimiento: new Date(today + 2 * dayMs) } });
 
   const { cuotaId, resumen } = await checkout(t, c);
   assert.equal(resumen.monto, 10000);
@@ -138,7 +138,8 @@ guard('aprobado: pago con bruto/neto/comisión/medio, cuota ACTIVA, cuota anteri
   const cuota = await prisma.cuota.findUnique({ where: { id: cuotaId }, include: { estadoCuota: true, pago: { include: { metodoPago: true } } } });
   assert.equal(cuota.estadoCuota.nombre, 'ACTIVA');
   assert.equal(iso(cuota.fechaInicio), iso(new Date(today)));
-  assert.equal(iso(cuota.fechaVencimiento), iso(new Date(today + 30 * dayMs)));
+  // Renovación anticipada: los 2 días que le quedaban se suman a los 30 del plan.
+  assert.equal(iso(cuota.fechaVencimiento), iso(new Date(today + 32 * dayMs)));
   const pago = cuota.pago;
   assert.equal(pago.metodoPago.nombre, 'MERCADO_PAGO');
   assert.equal(Number(pago.monto), 10000);

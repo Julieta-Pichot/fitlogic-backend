@@ -55,6 +55,14 @@ export const toGymIso = (date) => `${new Date(date.getTime() - 3 * 3_600_000).to
 
 export const createPreference = (body) => request('POST', '/checkout/preferences', body);
 
+// Vence una preferencia para que ya no se pueda pagar (se usa al reemplazar el plan pendiente por otro).
+export const expirePreference = (preferenceId, now = new Date()) =>
+  request('PUT', `/checkout/preferences/${encodeURIComponent(preferenceId)}`, {
+    expires: true,
+    expiration_date_from: toGymIso(new Date(now.getTime() - 60_000)),
+    expiration_date_to: toGymIso(now),
+  });
+
 export const getPayment = (paymentId) => request('GET', `/v1/payments/${encodeURIComponent(paymentId)}`);
 
 // Pagos asociados a una cuota (external_reference), del más reciente al más antiguo.

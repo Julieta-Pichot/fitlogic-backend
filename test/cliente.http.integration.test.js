@@ -181,6 +181,15 @@ guard('planes y checkout: monto del backend, sin token de MP en la respuesta y v
   const quarterly = plans.data.find((p) => /Trimestral/.test(p.nombre));
   assert.equal(quarterly.precioFinal, 34000);
 
+  // El demo tiene la membresía vigente a 8 días: todavía no puede renovar (mensaje claro, nada se crea en MP).
+  const blocked = await api('/cliente/membresia/checkout', { method: 'POST', body: { plan_id: quarterly.id } });
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.error, 'MEMBRESIA_VIGENTE');
+  assert.equal(mpCalls.filter((c) => c.url === '/checkout/preferences').length, 0);
+  // Faltando 2 días ya puede renovar.
+  const demoActive = await prisma.cuota.findFirst({ where: { cliente: { usuario: { email: demo.email } }, estadoCuota: { nombre: 'ACTIVA' } } });
+  await prisma.cuota.update({ where: { id: demoActive.id }, data: { fechaVencimiento: new Date(gymTodayMs() + 2 * 86_400_000) } });
+
   const checkout = await api('/cliente/membresia/checkout', { method: 'POST', body: { plan_id: quarterly.id, precio: 1, amount: 1 } });
   assert.equal(checkout.status, 201);
   assert.equal(checkout.data.initPoint, 'https://mp.test/checkout?pref=pref-ci');
@@ -208,11 +217,11 @@ guard('planes y checkout: monto del backend, sin token de MP en la respuesta y v
   assert.equal(again.data.estado, 'APROBADO');
   assert.equal(await prisma.pago.count({ where: { referenciaExterna: '99001' } }), 1);
 
-  // La nueva cuota arranca HOY (día del pago) y reemplaza a la anterior, que queda VENCIDA.
+  // La nueva cuota arranca HOY (día del pago), reemplaza a la anterior (que queda VENCIDA) y suma los 2 días que le quedaban.
   const { data: home } = await api('/cliente/inicio');
   assert.equal(home.membresia.cuota.plan.nombre, 'TESTDEMO-ci Plan Trimestral');
   assert.equal(home.membresia.cuota.fechaInicio, new Date(gymTodayMs()).toISOString().slice(0, 10));
-  assert.equal(home.membresia.cuota.diasRestantes, 90);
+  assert.equal(home.membresia.cuota.diasRestantes, 92);
   assert.equal(await prisma.cuota.count({ where: { cliente: { usuario: { email: demo.email } }, estadoCuota: { nombre: 'ACTIVA' } } }), 1);
 
   // Comprobante propio (HTML) y de otro cliente (404)

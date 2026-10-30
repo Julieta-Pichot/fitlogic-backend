@@ -1,13 +1,22 @@
 import prisma from '../lib/prisma.js';
 import { ConflictError, NotFoundError, ValidationError } from '../errors/AppError.js';
-import { activateQuota } from './quota-activation.service.js';
-import { listPlans } from './membership-payments.service.js';
-import { quotaPeriod } from '../utils/membership.js';
+import { activateQuota, supersedePendingQuotas } from './quota-activation.service.js';
+import { expirePreferences, listPlans } from './membership-payments.service.js';
+import { assertCanPay, computeMembershipStatus, quotaPeriod } from '../utils/membership.js';
 
 const findState = async (name) => {
   const state = await prisma.estadoCuota.findUnique({ where: { nombre: name } });
   if (!state) throw new ValidationError(`No existe el estado de cuota ${name}`);
   return state;
+};
+
+const membershipInclude = { plan: true, estadoCuota: true, pago: true };
+
+// Regla de negocio única (cliente y recepción): no se registra un nuevo pago mientras la membresía esté vigente con más de
+// DIAS_ANTICIPACION_RENOVACION días. Va SIEMPRE dentro de la transacción que ya bloqueó la fila del cliente.
+const assertClientCanPay = async (tx, clienteId, now, options) => {
+  const cuotas = await tx.cuota.findMany({ where: { clienteId }, include: membershipInclude });
+  assertCanPay(computeMembershipStatus(cuotas, now), options);
 };
 
 const quotaInclude = {
@@ -33,28 +42,29 @@ export const listQuotas = async ({ userId, clientId, activeOnly = false }) => {
   });
 };
 
-export const createPendingQuota = async ({ userId, clientId, planId }) => {
+export const createPendingQuota = async ({ userId, clientId, planId }, now = new Date()) => {
   const resolvedClientId = userId ? await getClientIdForUser(userId) : Number(clientId);
   const plan = await prisma.plan.findUnique({ where: { id: Number(planId) } });
   if (!plan || !plan.activo) throw new NotFoundError('Plan activo no encontrado');
   const pending = await findState('PENDIENTE');
 
-  const existingPending = await prisma.cuota.findFirst({ where: { clienteId: resolvedClientId, planId: plan.id, estadoCuotaId: pending.id } });
-  if (existingPending) throw new ConflictError('El cliente ya tiene una solicitud pendiente para este plan');
+  let replacedPreferences = [];
+  const created = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM cliente WHERE id = ${resolvedClientId} FOR UPDATE`;
+    await assertClientCanPay(tx, resolvedClientId, now, { propio: Boolean(userId) });
+    const existingPending = await tx.cuota.findFirst({ where: { clienteId: resolvedClientId, planId: plan.id, estadoCuotaId: pending.id, pago: { is: null } } });
+    if (existingPending) throw new ConflictError('El cliente ya tiene una solicitud pendiente para este plan');
 
-  const start = new Date();
-  const end = new Date(start);
-  end.setDate(end.getDate() + plan.duracionDias);
-  return prisma.cuota.create({
-    data: {
-      clienteId: resolvedClientId,
-      planId: plan.id,
-      estadoCuotaId: pending.id,
-      fechaInicio: start,
-      fechaVencimiento: end,
-    },
-    include: quotaInclude,
+    const row = await tx.cuota.create({
+      data: { clienteId: resolvedClientId, planId: plan.id, estadoCuotaId: pending.id, ...quotaPeriod(now, plan.duracionDias) },
+      include: quotaInclude,
+    });
+    // El plan nuevo reemplaza al pendiente anterior (no se acumulan).
+    replacedPreferences = await supersedePendingQuotas(tx, resolvedClientId, row.id);
+    return row;
   });
+  await expirePreferences(replacedPreferences);
+  return created;
 };
 
 // El monto lo calcula SIEMPRE el backend: precio del plan con la promoción vigente (el mismo que cobra Mercado Pago).
@@ -81,6 +91,7 @@ export const confirmQuotaPayment = async (quotaId, metodoPagoId, referenciaExter
 
   await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM cliente WHERE id = ${quota.clienteId} FOR UPDATE`;
+    await assertClientCanPay(tx, quota.clienteId, now);
     await activateQuota(tx, {
       cuotaId: quota.id,
       paidAt: now,
@@ -95,6 +106,7 @@ export const confirmQuotaPayment = async (quotaId, metodoPagoId, referenciaExter
         referenciaExterna: referenciaExterna ? String(referenciaExterna).trim() : null,
       },
     });
+    await supersedePendingQuotas(tx, quota.clienteId, quota.id, { includeOnline: false });
   });
   return getQuotaById(quota.id);
 };
@@ -123,6 +135,9 @@ export const registerReceptionPayment = async ({ clienteId, cuotaId, planId, met
     const client = await tx.cliente.findUnique({ where: { id: Number(clienteId) }, include: { estadoCliente: true } });
     if (!client) throw new NotFoundError('Cliente no encontrado');
     if (client.estadoCliente.nombre === 'INHABILITADO_BAJA') throw new ConflictError('El cliente está dado de baja: reactivalo desde el panel de administración antes de cobrar', 'CLIENTE_BAJA');
+
+    // Regla de negocio (validada acá, no solo en el front): pendiente_pago, vencida, sin plan o activa a 3 días o menos del vencimiento.
+    await assertClientCanPay(tx, client.id, now);
 
     // Anti doble clic / doble envío: no se acepta otro cobro del mismo cliente en los últimos segundos.
     const recent = await tx.pago.findFirst({ where: { cuota: { clienteId: client.id }, fechaPago: { gte: new Date(now.getTime() - DUPLICATE_WINDOW_MS) } } });
@@ -162,6 +177,8 @@ export const registerReceptionPayment = async ({ clienteId, cuotaId, planId, met
         referenciaExterna: null,
       },
     });
+    // Cobrada una cuota, las demás solicitudes del alta en recepción quedan obsoletas (las de Mercado Pago siguen su propio ciclo).
+    await supersedePendingQuotas(tx, client.id, quota.id, { includeOnline: false });
     return quota.id;
   });
   return getQuotaById(quotaId);

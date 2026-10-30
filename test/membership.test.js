@@ -84,3 +84,92 @@ test('firma del webhook: válida, alterada, sin secret', () => {
   assert.equal(verifyWebhookSignature({ ...args, signature: 'basura' }), false);
   assert.equal(verifyWebhookSignature({ ...args, secret: '', signature: `ts=${ts},v1=${sign('123456', 'req-1')}` }), false);
 });
+
+// ------------------------------- Estado único de la membresía (computeMembershipStatus) -------------------------------
+
+import { computeMembershipStatus, assertCanPay } from '../src/utils/membership.js';
+import { DIAS_ANTICIPACION_RENOVACION } from '../src/constants/index.js';
+
+const status = (cuotas, at = now) => computeMembershipStatus(cuotas, at);
+// Membresía ACTIVA que vence dentro de `days` días (hoy del test = 2030-06-10).
+const activeIn = (days) => cuota(1, 'ACTIVA', '2030-05-01', new Date(Date.UTC(2030, 5, 10 + days)).toISOString().slice(0, 10));
+
+test('la anticipación de renovación es una sola constante: 3 días', () => {
+  assert.equal(DIAS_ANTICIPACION_RENOVACION, 3);
+});
+
+test('activa con 90 y con 4 días: no se puede renovar ni registrar pago, con fecha y días para habilitarse', () => {
+  for (const days of [90, 4]) {
+    const m = status([activeIn(days)]);
+    assert.equal(m.estadoMembresia, 'activa');
+    assert.equal(m.renovacion.permitida, false);
+    assert.equal(m.renovacion.diasParaRenovar, days - 3);
+    assert.throws(() => assertCanPay(m), (error) => error.statusCode === 409 && error.code === 'MEMBRESIA_VIGENTE');
+  }
+  const m = status([activeIn(4)]);
+  assert.equal(m.renovacion.renovableDesde, '2030-06-11');
+  assert.match(m.renovacion.mensajeRecepcion, /vigente hasta el 14\/06\/2030\. Podrás registrar un nuevo pago desde el 11\/06\/2030/);
+  assert.match(m.renovacion.mensajeCliente, /Podrás renovar a partir del 11\/06\/2030 \(faltan 1 día\)/);
+});
+
+test('con exactamente 3, 2 y 0 días restantes queda por_vencer y se habilita', () => {
+  for (const days of [3, 2, 1, 0]) {
+    const m = status([activeIn(days)]);
+    assert.equal(m.estadoMembresia, 'por_vencer', `${days} días`);
+    assert.equal(m.renovacion.permitida, true);
+    assert.doesNotThrow(() => assertCanPay(m));
+  }
+});
+
+test('vencida: se habilita; vencida ayer cuenta como vencida (comparación por fecha, no por hora)', () => {
+  const m = status([cuota(1, 'ACTIVA', '2030-05-01', '2030-06-09')]);
+  assert.equal(m.estadoMembresia, 'vencida');
+  assert.equal(m.renovacion.permitida, true);
+});
+
+test('el borde del día usa hora de Buenos Aires: a las 22:00 del 10/06 (01:00 UTC del 11) el que vence el 13 todavía tiene 3 días', () => {
+  const lateNight = new Date('2030-06-11T01:00:00Z');
+  const m = status([cuota(1, 'ACTIVA', '2030-05-01', '2030-06-13')], lateNight);
+  assert.equal(m.diasRestantes, 3);
+  assert.equal(m.estadoMembresia, 'por_vencer');
+});
+
+test('plan elegido sin pago => pendiente_pago (no sin_plan) con plan, antigüedad y origen; sin cuotas => sin_plan', () => {
+  const pending = { ...cuota(7, 'PENDIENTE', '2030-06-07', '2030-07-07'), mpExpiraEn: null, mpPreferenceId: null };
+  const m = status([pending]);
+  assert.equal(m.estadoMembresia, 'pendiente_pago');
+  assert.equal(m.estado, 'SIN_MEMBRESIA'); // el estado histórico no cambia
+  assert.deepEqual([m.pendiente.cuotaId, m.pendiente.plan.nombre, m.pendiente.desde, m.pendiente.diasEspera, m.pendiente.origen], [7, 'Mensual', '2030-06-07', 3, 'RECEPCION']);
+  assert.equal(m.puedeVerificarPago, false); // se paga en recepción: no hay nada que verificar
+  assert.equal(m.renovacion.permitida, true);
+  assert.equal(status([]).estadoMembresia, 'sin_plan');
+  const online = status([{ ...pending, mpExpiraEn: new Date('2030-06-12T00:00:00Z') }]);
+  assert.equal(online.pendiente.origen, 'MERCADOPAGO');
+  assert.equal(online.puedeVerificarPago, true);
+});
+
+test('vencida + plan pendiente => pendiente_pago; activa + renovación pendiente => sigue activa', () => {
+  const pending = cuota(9, 'PENDIENTE', '2030-06-09', '2030-07-09');
+  assert.equal(status([cuota(1, 'ACTIVA', '2030-05-01', '2030-06-01'), pending]).estadoMembresia, 'pendiente_pago');
+  const active = status([activeIn(40), pending]);
+  assert.equal(active.estadoMembresia, 'activa');
+  assert.equal(active.renovacion.permitida, false);
+  assert.equal(active.solicitudPendiente, true);
+});
+
+test('con varias pendientes manda la más reciente (no se acumulan en pantalla)', () => {
+  const m = status([cuota(3, 'PENDIENTE', '2030-06-01', '2030-07-01'), cuota(8, 'PENDIENTE', '2030-06-09', '2030-07-09')]);
+  assert.equal(m.pendiente.cuotaId, 8);
+});
+
+test('renovación anticipada: el vencimiento se suma al vigente; si ya venció, cuenta desde hoy', () => {
+  const iso = (date) => date.toISOString().slice(0, 10);
+  const ms = (day) => Date.parse(`${day}T00:00:00Z`);
+  const early = quotaPeriod(now, 30, ms('2030-06-12'));
+  assert.equal(iso(early.fechaInicio), '2030-06-10');
+  assert.equal(iso(early.fechaVencimiento), '2030-07-12'); // 12/06 + 30 días, no 10/06 + 30
+  assert.equal(iso(quotaPeriod(now, 30, ms('2030-06-10')).fechaVencimiento), '2030-07-10'); // vence hoy
+  assert.equal(iso(quotaPeriod(now, 30, ms('2030-06-01')).fechaVencimiento), '2030-07-10'); // ya venció
+  assert.equal(iso(quotaPeriod(now, 90, ms('2030-06-12')).fechaVencimiento), '2030-09-10'); // otra duración
+  assert.equal(iso(quotaPeriod(now, 30).fechaVencimiento), '2030-07-10');
+});

@@ -24,6 +24,9 @@ export const ESTADOS_CUOTA = {
   PENDIENTE: 3,
 };
 
+// Días antes del vencimiento desde los que se puede renovar / registrar un nuevo pago (única fuente: cliente y recepción).
+export const DIAS_ANTICIPACION_RENOVACION = 3;
+
 export const METODOS_PAGO = {
   EFECTIVO: 1,
   TRANSFERENCIA: 2,

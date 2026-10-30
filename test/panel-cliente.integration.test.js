@@ -316,13 +316,13 @@ guard('seguridad del pago: monto distinto, moneda, cuota inexistente, cuota de o
   assert.equal((await payments.verifyReturn(ctx(A), { payment_id: 'x' })).estado, 'SIN_PAGO');
 });
 
-guard('renovación con membresía vigente: la nueva arranca HOY y la anterior pasa a VENCIDA sin tocar sus fechas', async (t) => {
+guard('renovación anticipada (faltan 2 días): la nueva arranca HOY, suma los días que quedaban y la anterior pasa a VENCIDA sin tocar sus fechas', async (t) => {
   const C = await mkClient('E'); // cliente sin pagos previos
   const plan = await mkPlan();
   const active = await prisma.estadoCuota.findUnique({ where: { nombre: 'ACTIVA' } });
   const day = 86_400_000;
   const todayUtc = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
-  const current = await prisma.cuota.create({ data: { clienteId: C.id, planId: plan.id, estadoCuotaId: active.id, fechaInicio: new Date(todayUtc - 20 * day), fechaVencimiento: new Date(todayUtc.getTime() + 10 * day) } });
+  const current = await prisma.cuota.create({ data: { clienteId: C.id, planId: plan.id, estadoCuotaId: active.id, fechaInicio: new Date(todayUtc - 28 * day), fechaVencimiento: new Date(todayUtc.getTime() + 2 * day) } });
   t.mock.method(globalThis, 'fetch', async () => mpResponse({ id: 'pref', init_point: 'https://mp.test/pay' }));
   const { cuotaId } = await payments.createCheckout(ctx(C), C.usuario, plan.id);
   t.mock.method(globalThis, 'fetch', async () => mpResponse(approvedPayment(cuotaId)));
@@ -331,6 +331,7 @@ guard('renovación con membresía vigente: la nueva arranca HOY y la anterior pa
   const todayGym = new Date(gymTodayMs());
   assert.equal(renewed.estadoCuota.nombre, 'ACTIVA');
   assert.equal(renewed.fechaInicio.getTime(), todayGym.getTime());
+  assert.equal(renewed.fechaVencimiento.getTime(), todayGym.getTime() + (2 + plan.duracionDias) * day); // desde el vencimiento actual, no desde hoy
   const old = await prisma.cuota.findUnique({ where: { id: current.id }, include: { estadoCuota: true } });
   assert.equal(old.estadoCuota.nombre, 'VENCIDA');
   assert.equal(old.fechaInicio.getTime(), current.fechaInicio.getTime());

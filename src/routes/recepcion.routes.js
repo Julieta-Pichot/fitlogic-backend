@@ -9,6 +9,7 @@ const router = Router();
 router.use(authenticateToken, ...requireReceptionEnabled);
 
 router.get('/dashboard/stats', recepcionController.getDashboardStats);
+router.get('/pagos-pendientes', recepcionController.listPendingPayments);
 router.get('/pagos', recentPaymentsValidator, validateRequest, recepcionController.listRecentPayments);
 router.get('/planes', recepcionController.listActivePlans);
 router.post('/pagos', registerPaymentValidator, validateRequest, recepcionController.registerPayment);

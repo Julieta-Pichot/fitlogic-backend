@@ -120,7 +120,7 @@ const ROUTES = [
   ['GET', '/admin/dashboard/stats', null, 'A'],
   ...['resumen', 'desglose', 'grafico', 'pagos', 'pagos/exportar.csv', 'pendientes', 'conciliacion'].map((s) => ['GET', `/admin/ingresos/${s}`, null, 'A']),
   ['POST', `/admin/ingresos/pendientes/${X}/verificar`, {}, 'A'],
-  ['GET', '/recepcion/dashboard/stats', null, 'R'], ['GET', '/recepcion/pagos', null, 'R'], ['POST', '/recepcion/pagos', {}, 'R'], ['GET', '/recepcion/planes', null, 'R'], ['PATCH', '/recepcion/me', {}, 'R'],
+  ['GET', '/recepcion/dashboard/stats', null, 'R'], ['GET', '/recepcion/pagos', null, 'R'], ['GET', '/recepcion/pagos-pendientes', null, 'R'], ['POST', '/recepcion/pagos', {}, 'R'], ['GET', '/recepcion/planes', null, 'R'], ['PATCH', '/recepcion/me', {}, 'R'],
   ['GET', '/ejercicios', null, 'P'], ['POST', '/ejercicios', {}, 'P'],
   ...['clientes', 'perfil', 'rutinas', 'clases', 'categorias-receta', 'recetas', 'notificaciones'].map((s) => ['GET', `/profesor/${s}`, null, 'P']),
   ['POST', '/profesor/rutinas', {}, 'P'], ['POST', '/profesor/clases', {}, 'P'], ['POST', '/profesor/recetas', {}, 'P'], ['PUT', '/profesor/perfil/password', {}, 'P'], ['PATCH', '/profesor/notificaciones/leidas', null, 'P'],

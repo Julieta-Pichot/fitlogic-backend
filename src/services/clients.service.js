@@ -8,6 +8,7 @@ import { toDateOnly } from '../utils/dates.js';
 import { detectDocumentType } from '../utils/file-signature.js';
 import { listPlans } from './membership-payments.service.js';
 import { parseStreakGoal } from '../utils/streak-goal.js';
+import { computeMembershipStatus } from '../utils/membership.js';
 
 const clientInclude = {
   usuario: { include: { rol: true } },
@@ -17,11 +18,14 @@ const clientInclude = {
 
 // Agrega a cada cuota PENDIENTE sin pago el `montoACobrar`: precio final calculado por el backend (plan + promoción vigente),
 // el mismo que cobra Mercado Pago. Es el importe que recepción debe registrar; el front no lo calcula.
+// También agrega `membresia` (estado, días restantes y si corresponde registrar un pago) con la misma función que usa el cliente.
 const attachAmountDue = async (value) => {
   const clients = Array.isArray(value) ? value : [value];
   const needsPricing = clients.some((client) => client.cuotas.some((quota) => quota.estadoCuota.nombre === 'PENDIENTE' && !quota.pago));
   const prices = needsPricing ? new Map((await listPlans()).map((plan) => [plan.id, plan.precioFinal])) : new Map();
+  const now = new Date();
   for (const client of clients) {
+    client.membresia = computeMembershipStatus(client.cuotas, now);
     for (const quota of client.cuotas) {
       if (quota.estadoCuota.nombre === 'PENDIENTE' && !quota.pago) quota.montoACobrar = prices.get(quota.planId) ?? Number(quota.plan.precio);
     }

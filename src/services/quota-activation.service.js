@@ -1,6 +1,6 @@
 import { ConflictError, NotFoundError, ValidationError } from '../errors/AppError.js';
 import { quotaPeriod } from '../utils/membership.js';
-import { msToIsoDate, dbDateMs } from '../utils/timezone.js';
+import { msToIsoDate, dbDateMs, gymTodayMs } from '../utils/timezone.js';
 
 const ddmmyyyy = (date) => msToIsoDate(dbDateMs(date)).split('-').reverse().join('/');
 
@@ -30,7 +30,13 @@ export const activateQuota = async (tx, { cuotaId, paidAt, pago, dedupKey = null
   ]);
   if (!active || !expired) throw new ValidationError('Faltan los estados de cuota ACTIVA / VENCIDA');
 
-  const period = quotaPeriod(paidAt, cuota.plan.duracionDias);
+  // Renovación anticipada: si hay una membresía ACTIVA que todavía no venció, la nueva se suma a su vencimiento.
+  const current = await tx.cuota.aggregate({
+    _max: { fechaVencimiento: true },
+    where: { clienteId: cuota.clienteId, id: { not: cuota.id }, estadoCuotaId: active.id, fechaVencimiento: { gte: new Date(gymTodayMs(paidAt)) } },
+  });
+  const currentEnd = current._max.fechaVencimiento;
+  const period = quotaPeriod(paidAt, cuota.plan.duracionDias, currentEnd ? dbDateMs(currentEnd) : null);
 
   await tx.cuota.updateMany({
     where: { clienteId: cuota.clienteId, id: { not: cuota.id }, estadoCuotaId: active.id },
@@ -54,6 +60,28 @@ export const activateQuota = async (tx, { cuotaId, paidAt, pago, dedupKey = null
   });
 
   return { cuotaId: cuota.id, clienteId: cuota.clienteId, pagoId: created.id, ...period, plan: cuota.plan };
+};
+
+// Un cliente tiene como mucho UNA solicitud de pago pendiente: al elegir/cobrar otra, las demás sin pago quedan reemplazadas.
+// Las del alta en recepción (sin Mercado Pago) se eliminan; las que nacieron de un checkout online se conservan como VENCIDA
+// (auditoría, y se reactivan si su pago llega tarde). Va dentro de la transacción que ya bloqueó al cliente.
+export const supersedePendingQuotas = async (tx, clienteId, keepId = null, { includeOnline = true } = {}) => {
+  const [pendingState, expiredState] = await Promise.all([
+    tx.estadoCuota.findUnique({ where: { nombre: 'PENDIENTE' } }),
+    tx.estadoCuota.findUnique({ where: { nombre: 'VENCIDA' } }),
+  ]);
+  if (!pendingState || !expiredState) throw new ValidationError('Faltan los estados de cuota PENDIENTE / VENCIDA');
+
+  const others = await tx.cuota.findMany({
+    where: { clienteId, estadoCuotaId: pendingState.id, pago: { is: null }, ...(keepId ? { id: { not: keepId } } : {}) },
+    select: { id: true, mpExpiraEn: true, mpPreferenceId: true, _count: { select: { eventosMp: true } } },
+  });
+  const removable = others.filter((cuota) => !cuota.mpExpiraEn && !cuota.mpPreferenceId && cuota._count.eventosMp === 0).map((cuota) => cuota.id);
+  const keepAsExpired = includeOnline ? others.filter((cuota) => !removable.includes(cuota.id)).map((cuota) => cuota.id) : [];
+  if (removable.length) await tx.cuota.deleteMany({ where: { id: { in: removable }, pago: { is: null } } });
+  if (keepAsExpired.length) await tx.cuota.updateMany({ where: { id: { in: keepAsExpired }, pago: { is: null } }, data: { estadoCuotaId: expiredState.id } });
+  // Preferencias de Mercado Pago que quedaron reemplazadas: quien llama las vence (fuera de la transacción) para que no se puedan pagar.
+  return others.filter((cuota) => keepAsExpired.includes(cuota.id) && cuota.mpPreferenceId).map((cuota) => cuota.mpPreferenceId);
 };
 
 // INSERT IGNORE sobre notificacion (UNIQUE usuario + tipo + clave_dedup): una notificación por pago.

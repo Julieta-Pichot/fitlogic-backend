@@ -3,10 +3,48 @@ import { ConflictError, NotFoundError } from '../errors/AppError.js';
 import { gymDayRange, gymMonthRange } from '../utils/timezone.js';
 import { getCurrentUser } from './auth.service.js';
 import { listPlans } from './membership-payments.service.js';
+import { computeMembershipStatus } from '../utils/membership.js';
 
 const toAmount = (value) => {
   const amount = Number(value ?? 0);
   return Number.isFinite(amount) ? amount : 0;
+};
+
+// "Pagos pendientes" = CLIENTES con alguna cuota PENDIENTE sin pago (el mismo criterio que el filtro de la pantalla Clientes).
+// UNA sola consulta alimenta el número de la tarjeta y la lista del modal, así que siempre coinciden.
+// Ordenados por antigüedad: primero el que más hace que espera.
+export const listPendingPayments = async (now = new Date()) => {
+  const clients = await prisma.cliente.findMany({
+    where: { cuotas: { some: { estadoCuota: { nombre: 'PENDIENTE' }, pago: { is: null } } } },
+    include: { usuario: true, estadoCliente: true, cuotas: { include: { plan: true, estadoCuota: true, pago: true } } },
+  });
+  const prices = new Map((await listPlans(now)).map((plan) => [plan.id, plan.precioFinal]));
+
+  const items = clients
+    .map((client) => {
+      const membership = computeMembershipStatus(client.cuotas, now);
+      const pending = membership.pendiente;
+      return {
+        clienteId: client.id,
+        cuotaId: pending.cuotaId,
+        nombre: `${client.usuario.nombre} ${client.usuario.apellido}`.trim(),
+        email: client.usuario.email,
+        telefono: client.usuario.telefono,
+        estadoCliente: client.estadoCliente.nombre,
+        plan: pending.plan.nombre,
+        monto: prices.get(pending.plan.id) ?? pending.plan.precio,
+        pendienteDesde: pending.desde,
+        diasEspera: pending.diasEspera,
+        estadoMembresia: membership.estadoMembresia,
+        diasRestantes: membership.diasRestantes,
+        puedeRegistrarPago: membership.renovacion.permitida && client.estadoCliente.nombre !== 'INHABILITADO_BAJA',
+        motivoBloqueo: client.estadoCliente.nombre === 'INHABILITADO_BAJA'
+          ? 'El cliente está dado de baja: reactivalo desde el panel de administración antes de cobrar.'
+          : membership.renovacion.mensajeRecepcion,
+      };
+    })
+    .sort((a, b) => a.pendienteDesde.localeCompare(b.pendienteDesde) || a.clienteId - b.clienteId);
+  return { total: items.length, items };
 };
 
 export const getDashboardStats = async () => {
@@ -15,14 +53,13 @@ export const getDashboardStats = async () => {
   const { start: dayStart, end: dayEnd } = gymDayRange(now);
   const { start: monthStart, end: monthEnd } = gymMonthRange(now);
 
-  const [clientesActivos, clientesInactivos, pagosPendientes, asistenciasHoy, ingresosDia, ingresosMes] =
+  const [clientesActivos, clientesInactivos, pendientes, asistenciasHoy, ingresosDia, ingresosMes] =
     await Promise.all([
       prisma.cliente.count({ where: { estadoCliente: { nombre: 'HABILITADO' } } }),
       prisma.cliente.count({
         where: { estadoCliente: { nombre: { in: ['INHABILITADO_PAGO', 'INHABILITADO_BAJA'] } } },
       }),
-      // "Pagos pendientes" = CLIENTES con alguna cuota PENDIENTE sin pago (el mismo criterio que el filtro de la pantalla Clientes).
-      prisma.cliente.count({ where: { cuotas: { some: { estadoCuota: { nombre: 'PENDIENTE' }, pago: { is: null } } } } }),
+      listPendingPayments(now),
       prisma.asistencia.count({ where: { fechaHora: { gte: dayStart, lt: dayEnd } } }),
       prisma.pago.aggregate({ _sum: { monto: true }, where: { fechaPago: { gte: dayStart, lt: dayEnd } } }),
       prisma.pago.aggregate({ _sum: { monto: true }, where: { fechaPago: { gte: monthStart, lt: monthEnd } } }),
@@ -31,7 +68,7 @@ export const getDashboardStats = async () => {
   return {
     clientesActivos,
     clientesInactivos,
-    pagosPendientes,
+    pagosPendientes: pendientes.total,
     asistenciasHoy,
     ingresosDelDia: toAmount(ingresosDia._sum.monto),
     ingresosDelMes: toAmount(ingresosMes._sum.monto),
