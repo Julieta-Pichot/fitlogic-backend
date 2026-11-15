@@ -99,6 +99,7 @@ export const listUsers = async (_gimnasioId, query) => {
           { nombre: { contains: search } },
           { apellido: { contains: search } },
           { email: { contains: search } },
+          { telefono: { contains: search } },
         ] }
       : {}),
   };
