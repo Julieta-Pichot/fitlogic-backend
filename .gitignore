@@ -35,3 +35,6 @@ npm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Respaldos locales de datos (emails reales de usuarios)
+db/backups/

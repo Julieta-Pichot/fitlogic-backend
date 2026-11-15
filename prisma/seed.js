@@ -39,15 +39,13 @@ async function main() {
   // 1. CATÁLOGOS
   // --------------------------------------------------------------------
 
-  const roles = await Promise.all(
-    ['ADMIN', 'PROFESOR', 'RECEPCIONISTA', 'CLIENTE'].map((nombre) =>
-      prisma.rol.upsert({
-        where: { nombre },
-        update: {},
-        create: { nombre },
-      })
-    )
-  );
+  // Secuencial a propósito: el código (constants/ROLES) y el frontend dan por hecho
+  // ADMIN=1, PROFESOR=2, RECEPCIONISTA=3, CLIENTE=4. Con Promise.all los ids salían
+  // en orden aleatorio y el rol de los usuarios creados desde la app quedaba cruzado.
+  const roles = [];
+  for (const nombre of ['ADMIN', 'PROFESOR', 'RECEPCIONISTA', 'CLIENTE']) {
+    roles.push(await prisma.rol.upsert({ where: { nombre }, update: {}, create: { nombre } }));
+  }
 
   const estadosCliente = await Promise.all(
     ['HABILITADO', 'INHABILITADO_PAGO', 'INHABILITADO_BAJA'].map((nombre) =>
