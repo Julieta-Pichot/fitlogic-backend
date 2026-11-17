@@ -73,3 +73,14 @@ export const resetUserPassword = async (req, res, next) => {
     return next(error);
   }
 };
+export const exportUsersCsv = async (req, res, next) => {
+  try {
+    const csv = await usersService.exportUsersCsv(req.query);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="usuarios.csv"');
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.send(csv);
+  } catch (error) {
+    return next(error);
+  }
+};
