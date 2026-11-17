@@ -333,6 +333,11 @@ export const deleteClass = async (profesorId, classId) =>
   prisma.$transaction(async (tx) => {
     const current = await findOwnedClass(profesorId, classId, tx);
 
+    //1. Aca lo que hacemos es la verificacion. Si la clase tiene alumnos inscriptos, frenamos el borrado
+    if (current._count.inscripciones > 0) {
+      throw new ConflictError('No se puede eliminar la clase porque tiene alumnos inscriptos.');
+    }
+
     // Las FK no tienen ON DELETE CASCADE: se borran las dependencias a mano.
     // Notificaciones: las pendientes se eliminan; las ya leídas se conservan sin la referencia.
     await tx.notificacion.deleteMany({ where: { claseId: current.id, leida: false } });
@@ -342,5 +347,6 @@ export const deleteClass = async (profesorId, classId) =>
     await tx.claseDia.deleteMany({ where: { claseId: current.id } });
     await tx.clase.delete({ where: { id: current.id } });
 
-    return { id: current.id, inscriptosEliminados: current._count.inscripciones };
+    return { id: current.id, inscriptosEliminados: 0 };
   });
+
