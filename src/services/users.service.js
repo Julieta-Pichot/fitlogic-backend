@@ -84,9 +84,7 @@ const replaceRoleProfile = async (tx, { user, newRolId, especialidades, objetivo
     objetivoDiasSemana,
   });
 };
-
-export const listUsers = async (_gimnasioId, query) => {
-  const { page, limit, skip } = parsePaginationParams(query);
+const buildUserQuery = (query) => {
   const search = parseSearchParam(query);
   const { sortBy, sortOrder } = parseSortParams(query, USER_SORT_FIELDS);
   const rolId = query.rolId ? Number(query.rolId) : undefined;
@@ -103,6 +101,11 @@ export const listUsers = async (_gimnasioId, query) => {
         ] }
       : {}),
   };
+  return { where, sortBy, sortOrder };
+};
+export const listUsers = async (_gimnasioId, query) => {
+  const { page, limit, skip } = parsePaginationParams(query);
+  const { where, sortBy, sortOrder } = buildUserQuery(query);
 
   const [items, total] = await prisma.$transaction([
     prisma.usuario.findMany({ where, include: userInclude, orderBy: { [sortBy]: sortOrder }, skip, take: limit }),
@@ -256,4 +259,36 @@ export const resetUserPassword = async (_gimnasioId, actorId, userId, newPasswor
   });
   logger.info('Contraseña de usuario restablecida', { userId, actorId });
   return { success: true };
+};
+const csvCell = (value) => {
+  let text = value === null || value === undefined ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return /[";\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+export const exportUsersCsv = async (query = {}) => {
+  const { where, sortBy, sortOrder } = buildUserQuery(query);
+  const users = await prisma.usuario.findMany({
+    where,
+    include: { rol: true },
+    orderBy: { [sortBy]: sortOrder },
+    take: 50_000,
+  });
+
+  const header = ['Nombre', 'Apellido', 'Email', 'Teléfono', 'Rol', 'Estado', 'Fecha de alta'];
+  const lines = users.map((user) =>
+    [
+      user.nombre,
+      user.apellido,
+      user.email,
+      user.telefono,
+      user.rol?.nombre,
+      user.activo ? 'Activo' : 'Inactivo',
+      user.fechaCreacion.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }),
+    ]
+      .map(csvCell)
+      .join(';')
+  );
+
+  return `\uFEFF${[header.map(csvCell).join(';'), ...lines].join('\r\n')}\r\n`;
 };

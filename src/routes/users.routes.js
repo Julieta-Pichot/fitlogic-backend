@@ -16,6 +16,7 @@ const router = Router();
 router.use(authenticateToken, requireAdmin);
 
 router.get('/', listUsersValidator, validateRequest, usersController.listUsers);
+router.get('/exportar.csv', listUsersValidator, validateRequest, usersController.exportUsersCsv);
 router.get('/:id', userIdValidator, validateRequest, usersController.getUser);
 router.post('/', createUserValidator, validateRequest, usersController.createUser);
 router.patch('/:id', updateUserValidator, validateRequest, usersController.updateUser);
